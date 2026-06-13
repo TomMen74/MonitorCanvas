@@ -6,9 +6,9 @@
 
 [![Windows](https://img.shields.io/badge/Windows-10%20%7C%2011-1A1A1A?style=for-the-badge&logo=windows&logoColor=FF8C00)](https://github.com/TomMen74/MonitorCanvas)
 [![Lizenz](https://img.shields.io/badge/Lizenz-MIT-FF8C00?style=for-the-badge)](LICENSE.txt)
-[![Windows-Pakete](https://img.shields.io/badge/Download-GitHub%20Actions-FF8C00?style=for-the-badge&logo=githubactions&logoColor=1A1A1A)](https://github.com/TomMen74/MonitorCanvas/actions/workflows/release.yml)
+[![Download](https://img.shields.io/badge/Download-Neueste%20Version-FF8C00?style=for-the-badge&logo=windows&logoColor=1A1A1A)](https://github.com/TomMen74/MonitorCanvas/releases/latest)
 
-### [Windows-Version herunterladen](https://github.com/TomMen74/MonitorCanvas/actions/workflows/release.yml)
+## [MonitorCanvas für Windows herunterladen](https://github.com/TomMen74/MonitorCanvas/releases/latest)
 
 </div>
 
@@ -34,14 +34,15 @@ auf dem eigenen Computer.
 
 ## Installation
 
-Nach einem erfolgreichen Lauf unter
-[GitHub Actions](https://github.com/TomMen74/MonitorCanvas/actions/workflows/release.yml)
-stehen unter **Artifacts** zwei Varianten bereit:
+Unter [Releases](https://github.com/TomMen74/MonitorCanvas/releases/latest)
+stehen die fertigen Windows-Dateien gut sichtbar zum Download bereit:
 
 | Variante | Geeignet für | Verwendung |
 |---|---|---|
 | **Setup.exe** | normale Installation | herunterladen, doppelklicken, installieren |
 | **Portable.zip** | USB-Stick oder Rechner ohne Installation | entpacken und `MonitorCanvas.exe` starten |
+
+Für die meisten Nutzer ist die Datei mit **`Setup.exe`** am einfachsten.
 
 Es werden weder Python noch Node.js benötigt. MonitorCanvas nutzt ausschließlich
 Bestandteile, die unter Windows 10 und Windows 11 vorhanden sind.
@@ -64,6 +65,16 @@ erstellt.
 - automatische Wiederherstellung der letzten Sitzung
 - PNG-Export in der Größe des virtuellen Windows-Desktops
 - direkte Übernahme als Windows-Hintergrund
+
+## Teststatus
+
+**Version 1.0.0** wurde im realen Betrieb mit zwei Monitoren getestet,
+einschließlich einer gemischten Anordnung aus Quer- und Hochformat.
+
+Die Anwendung und ihre Berechnungslogik sind für bis zu vier Monitore
+ausgelegt. Der Betrieb mit drei oder vier gleichzeitig angeschlossenen
+Monitoren konnte mangels entsprechender Testhardware bisher noch nicht
+praktisch bestätigt werden.
 
 ## Rahmen präzise einstellen
 
@@ -113,12 +124,12 @@ auf `start.bat`.
 
 Neue Windows-Pakete werden über GitHub Actions gebaut. Der Workflow
 **Windows-Pakete erstellen** kann auf GitHub manuell mit einer Versionsnummer
-gestartet werden. Ein Versions-Tag wie `v0.2.0` erstellt zusätzlich automatisch
+gestartet werden. Ein Versions-Tag wie `v1.0.0` erstellt zusätzlich automatisch
 ein öffentliches GitHub Release:
 
 ```text
-MonitorCanvas-0.2.0-Setup.exe
-MonitorCanvas-0.2.0-Portable.zip
+MonitorCanvas-1.0.0-Setup.exe
+MonitorCanvas-1.0.0-Portable.zip
 ```
 
 ## Lizenz
