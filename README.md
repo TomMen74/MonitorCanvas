@@ -24,6 +24,14 @@ berücksichtigt.
 Die Bedienung läuft im Browser. Alle Bilder und Einstellungen bleiben lokal
 auf dem eigenen Computer.
 
+<div align="center">
+
+![MonitorCanvas mit frei positioniertem Panorama über Quer- und Hochformat-Monitor](docs/images/monitorcanvas-editor.png)
+
+*Bilder auswählen, direkt in der Monitorwand positionieren und in Echtzeit prüfen.*
+
+</div>
+
 ## Installation
 
 Auf der Seite [Releases](https://github.com/TomMen74/MonitorCanvas/releases)
@@ -56,6 +64,21 @@ erstellt.
 - PNG-Export in der Größe des virtuellen Windows-Desktops
 - direkte Übernahme als Windows-Hintergrund
 
+## Rahmen präzise einstellen
+
+Jeder erkannte Monitor besitzt eigene Werte für oben, rechts, unten und links.
+Beliebige Seiten können gekoppelt und dann gemeinsam per Regler oder direkter
+Millimeter-Eingabe geändert werden. Das funktioniert auch bei gemischtem Quer-
+und Hochformat.
+
+<div align="center">
+
+![Individuelle Rahmenkorrektur für zwei unterschiedlich ausgerichtete Monitore](docs/images/monitorcanvas-rahmen.png)
+
+*Eigene Rahmenwerte je Monitor und Seite, inklusive Hochformat-Unterstützung.*
+
+</div>
+
 ## Bedienung
 
 1. Bilder auswählen oder in die Anwendung ziehen.
@@ -87,8 +110,10 @@ physischen Monitorrahmen verdeckt wird.
 Für einen direkten Start aus dem Quellcode genügt unter Windows ein Doppelklick
 auf `start.bat`.
 
-Neue Windows-Pakete werden über GitHub Actions gebaut. Ein Tag wie `v0.2.0`
-erstellt automatisch:
+Neue Windows-Pakete werden über GitHub Actions gebaut. Der Workflow
+**Windows-Pakete erstellen** kann auf GitHub manuell mit einer Versionsnummer
+gestartet werden. Ein Versions-Tag wie `v0.2.0` erstellt zusätzlich automatisch
+ein öffentliches GitHub Release:
 
 ```text
 MonitorCanvas-0.2.0-Setup.exe
