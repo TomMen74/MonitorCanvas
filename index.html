@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MonitorCanvas</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <a class="brand" href="#" aria-label="MonitorCanvas Startseite">
+        <span class="brand-mark"><i></i><i></i><i></i></span>
+        <span>MonitorCanvas</span>
+      </a>
+      <div class="topbar-actions">
+        <span id="systemStatus" class="status-dot">System wird geprüft</span>
+        <button id="saveProjectButton" class="button button-quiet" type="button">Projekt speichern</button>
+        <label class="button button-quiet file-button">
+          Projekt öffnen
+          <input id="projectInput" type="file" accept=".monitorcanvas.json,application/json">
+        </label>
+      </div>
+    </header>
+
+    <main>
+      <section class="hero">
+        <div>
+          <p class="eyebrow">Panorama-Werkstatt</p>
+          <h1>Ein Motiv. Jeder Bildschirm.<br><span>Sauber ausgerichtet.</span></h1>
+          <p class="hero-copy">Baue einen durchgängigen Hintergrund über bis zu vier Monitore. Monitorrahmen und Abstände werden dabei mitgedacht.</p>
+        </div>
+        <div class="hero-stat">
+          <strong id="monitorCount">0</strong>
+          <span>Monitore erkannt</span>
+          <button id="refreshMonitorsButton" class="text-button" type="button">Neu prüfen</button>
+        </div>
+      </section>
+
+      <nav class="steps" aria-label="Arbeitsschritte">
+        <button class="step active" data-step="images" type="button"><span>1</span>Bilder</button>
+        <button class="step" data-step="monitors" type="button"><span>2</span>Monitore</button>
+        <button class="step" data-step="frames" type="button"><span>3</span>Rahmen</button>
+        <button class="step" data-step="preview" type="button"><span>4</span>Vorschau</button>
+      </nav>
+
+      <div class="workspace">
+        <aside class="control-panel">
+          <section class="panel-section step-panel active" data-panel="images">
+            <div class="section-heading">
+              <div>
+                <p class="eyebrow">Quelle</p>
+                <h2>Motiv auswählen</h2>
+              </div>
+              <span id="imageCount" class="count-badge">0</span>
+            </div>
+
+            <label id="dropZone" class="drop-zone">
+              <input id="imageInput" type="file" accept="image/png,image/jpeg,image/webp" multiple>
+              <span class="drop-icon">+</span>
+              <strong>Bilder hier ablegen</strong>
+              <span>oder vom Computer auswählen</span>
+            </label>
+
+            <div id="imageList" class="image-list"></div>
+
+            <div class="field-group">
+              <label for="fitMode">Bildanpassung</label>
+              <select id="fitMode">
+                <option value="cover">Fläche füllen</option>
+                <option value="contain">Vollständig anzeigen</option>
+                <option value="stretch">Exakt strecken</option>
+              </select>
+            </div>
+
+            <div class="slider-row">
+              <label for="zoom">Zoom <output id="zoomOutput">100 %</output></label>
+              <input id="zoom" type="range" min="25" max="300" value="100">
+            </div>
+            <div class="slider-row">
+              <label for="offsetX">Horizontal <output id="offsetXOutput">0 %</output></label>
+              <input id="offsetX" type="range" min="-100" max="100" value="0">
+            </div>
+            <div class="slider-row">
+              <label for="offsetY">Vertikal <output id="offsetYOutput">0 %</output></label>
+              <input id="offsetY" type="range" min="-100" max="100" value="0">
+            </div>
+          </section>
+
+          <section class="panel-section step-panel" data-panel="monitors">
+            <div class="section-heading">
+              <div>
+                <p class="eyebrow">System</p>
+                <h2>Monitoranordnung</h2>
+              </div>
+            </div>
+            <p class="helper">Die Positionen stammen aus Windows. Prüfe, ob sie deiner echten Anordnung entsprechen.</p>
+            <div id="monitorList" class="monitor-list"></div>
+          </section>
+
+          <section class="panel-section step-panel" data-panel="frames">
+            <div class="section-heading">
+              <div>
+                <p class="eyebrow">Feinjustierung</p>
+                <h2>Rahmen & Abstände</h2>
+              </div>
+            </div>
+            <p class="helper">Trage die sichtbare Unterbrechung zwischen benachbarten Monitoren in Millimetern ein.</p>
+            <div class="field-group">
+              <label for="screenDiagonal">Referenz-Bildschirmgröße</label>
+              <div class="input-suffix">
+                <input id="screenDiagonal" type="number" min="10" max="80" step="0.1" value="27">
+                <span>Zoll</span>
+              </div>
+            </div>
+            <label class="toggle-row">
+              <span>
+                <strong>Gleiche Rahmen verwenden</strong>
+                <small>Ein Wert für alle Übergänge</small>
+              </span>
+              <input id="uniformFrames" type="checkbox" checked>
+            </label>
+            <div id="gapControls" class="gap-controls"></div>
+          </section>
+
+          <section class="panel-section step-panel" data-panel="preview">
+            <div class="section-heading">
+              <div>
+                <p class="eyebrow">Fertigstellen</p>
+                <h2>Export & Übernahme</h2>
+              </div>
+            </div>
+            <div class="export-summary">
+              <span>Ausgabeformat</span>
+              <strong id="exportSize">–</strong>
+              <span>Windows-Modus</span>
+              <strong>Über mehrere Monitore spannen</strong>
+            </div>
+            <button id="downloadButton" class="button button-secondary button-full" type="button">PNG herunterladen</button>
+            <button id="applyButton" class="button button-primary button-full" type="button">Als Hintergrund übernehmen</button>
+            <p class="fine-print">Das erzeugte Bild wird lokal gespeichert. Deine Quellbilder werden nicht hochgeladen.</p>
+          </section>
+        </aside>
+
+        <section class="canvas-panel">
+          <div class="canvas-toolbar">
+            <div>
+              <p class="eyebrow">Live-Ansicht</p>
+              <h2>Deine Monitorwand</h2>
+            </div>
+            <div class="view-switch" role="group" aria-label="Vorschaumodus">
+              <button class="active" data-view="real" type="button">Real</button>
+              <button data-view="technical" type="button">Technisch</button>
+            </div>
+          </div>
+          <div id="previewStage" class="preview-stage">
+            <canvas id="previewCanvas"></canvas>
+            <div id="emptyPreview" class="empty-preview">
+              <span class="empty-preview-icon"></span>
+              <strong>Bereit für dein Panorama</strong>
+              <span>Wähle links ein Bild aus.</span>
+            </div>
+          </div>
+          <div class="canvas-footer">
+            <span><i class="legend-screen"></i>Sichtbare Fläche</span>
+            <span><i class="legend-gap"></i>Rahmen & Abstand</span>
+            <span id="qualityNotice" class="quality-notice">Noch kein Bild gewählt</span>
+          </div>
+        </section>
+      </div>
+    </main>
+  </div>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <script src="app.js"></script>
+</body>
+</html>
