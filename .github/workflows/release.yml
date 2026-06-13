@@ -34,11 +34,17 @@ jobs:
           "number=$version" >> $env:GITHUB_OUTPUT
 
       - name: Programmstarter kompilieren
-        shell: cmd
+        shell: pwsh
         run: |
-          call "%ProgramFiles%\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
-          if not exist dist mkdir dist
-          cl /nologo /O2 /MT /std:c++17 /DUNICODE /D_UNICODE /EHsc launcher\MonitorCanvas.cpp /Fe:dist\MonitorCanvas.exe /link /SUBSYSTEM:WINDOWS shell32.lib user32.lib
+          New-Item -ItemType Directory -Force dist | Out-Null
+          $compiler = "$env:WINDIR\Microsoft.NET\Framework64\v4.0.30319\csc.exe"
+          if (-not (Test-Path $compiler)) {
+            throw "Der Windows C#-Compiler wurde nicht gefunden."
+          }
+          & $compiler /nologo /target:winexe /optimize+ `
+            /reference:System.Windows.Forms.dll `
+            /out:dist\MonitorCanvas.exe `
+            launcher\MonitorCanvas.cs
 
       - name: Programmdateien zusammenstellen
         shell: pwsh
