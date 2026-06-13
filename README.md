@@ -61,6 +61,9 @@ erstellt.
 - Kopplung beliebiger Rahmenseiten für gemeinsame Änderungen
 - mehrere Quellbilder automatisch anordnen und frei zusammenfügen
 - Bilder direkt in der Vorschau verschieben und an Kanten einrasten
+- KI-Prompt-Assistent passend zur erkannten Monitorwand
+- automatische Empfehlung für Seitenverhältnis und Bildauflösung
+- herunterladbare Kompositionsmaske für externe Bildgeneratoren
 - Echtzeitvorschau mit realer und technischer Ansicht
 - automatische Wiederherstellung der letzten Sitzung
 - PNG-Export in der Größe des virtuellen Windows-Desktops
@@ -75,6 +78,17 @@ Die Anwendung und ihre Berechnungslogik sind für bis zu vier Monitore
 ausgelegt. Der Betrieb mit drei oder vier gleichzeitig angeschlossenen
 Monitoren konnte mangels entsprechender Testhardware bisher noch nicht
 praktisch bestätigt werden.
+
+## KI-Wallpaper planen
+
+Der integrierte Assistent benötigt kein KI-Konto und keinen API-Schlüssel.
+Aus Motiv, Stil und gewünschter Stimmung entsteht ein fertiger Prompt, der die
+erkannte Monitoranordnung, Hochformatbereiche, Rahmenübergänge und sichere
+Positionen für wichtige Bildinhalte berücksichtigt.
+
+MonitorCanvas empfiehlt außerdem eine native Mindestauflösung und eine ideale
+Generierungsgröße. Eine passende Kompositionsmaske kann als PNG heruntergeladen
+und bei einem externen Bildgenerator als visuelle Referenz verwendet werden.
 
 ## Rahmen präzise einstellen
 

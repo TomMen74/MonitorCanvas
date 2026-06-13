@@ -1,6 +1,6 @@
 #define MyAppName "MonitorCanvas"
 #ifndef MyAppVersion
-  #define MyAppVersion "0.1.0"
+  #define MyAppVersion "1.1.0"
 #endif
 #define MyAppPublisher "TomMen74"
 #define MyAppURL "https://github.com/TomMen74/MonitorCanvas"

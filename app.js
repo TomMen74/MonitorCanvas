@@ -10,6 +10,13 @@ const state = {
   gaps: {},
   frames: {},
   verticalOffsets: {},
+  ai: {
+    subject: "",
+    style: "cinematic",
+    mood: "dramatic",
+    focus: "automatic",
+    avoid: ""
+  },
   view: "real"
 };
 
@@ -25,6 +32,13 @@ const elements = {
   systemStatus: document.querySelector("#systemStatus"),
   frameControls: document.querySelector("#frameControls"),
   frameMonitorCount: document.querySelector("#frameMonitorCount"),
+  aiSubject: document.querySelector("#aiSubject"),
+  aiStyle: document.querySelector("#aiStyle"),
+  aiMood: document.querySelector("#aiMood"),
+  aiFocus: document.querySelector("#aiFocus"),
+  aiAvoid: document.querySelector("#aiAvoid"),
+  aiPrompt: document.querySelector("#aiPrompt"),
+  aiRecommendation: document.querySelector("#aiRecommendation"),
   qualityNotice: document.querySelector("#qualityNotice"),
   exportSize: document.querySelector("#exportSize"),
   toast: document.querySelector("#toast"),
@@ -102,6 +116,7 @@ function serializableSession() {
     gaps: state.gaps,
     frames: state.frames,
     verticalOffsets: state.verticalOffsets,
+    ai: state.ai,
     view: state.view,
     images: state.images.map(image => ({
       id: image.id,
@@ -140,6 +155,7 @@ async function restoreSession() {
     state.gaps = saved.gaps ?? {};
     state.frames = saved.frames ?? {};
     state.verticalOffsets = saved.verticalOffsets ?? {};
+    state.ai = { ...state.ai, ...(saved.ai ?? {}) };
     state.view = saved.view ?? "real";
 
     const blobs = await readImageBlobs();
@@ -723,6 +739,7 @@ function renderPreview() {
 
   elements.emptyPreview.hidden = Boolean(activeImage());
   updateQuality(layout);
+  updateAIAssistant();
 }
 
 function updateQuality(layout) {
@@ -739,6 +756,162 @@ function updateQuality(layout) {
     ? "Bildauflösung ist ausreichend"
     : `Hinweis: Motiv wird auf etwa ${Math.round(requiredScale * 100)} % vergrößert`;
   elements.qualityNotice.className = `quality-notice ${good ? "good" : "warn"}`;
+}
+
+function roundToMultiple(value, multiple = 64) {
+  return Math.ceil(value / multiple) * multiple;
+}
+
+function aiWallpaperPlan() {
+  const layout = physicalLayout();
+  const nativeWidth = roundToMultiple(layout.width);
+  const nativeHeight = roundToMultiple(layout.height);
+  const idealScale = Math.max(1, Math.min(1.5, 12288 / Math.max(nativeWidth, nativeHeight)));
+  const idealWidth = roundToMultiple(nativeWidth * idealScale);
+  const idealHeight = roundToMultiple(nativeHeight * idealScale);
+  const ratio = layout.width / layout.height;
+  const portraitMonitors = layout.monitors
+    .map((monitor, index) => ({ monitor, index }))
+    .filter(item => item.monitor.height > item.monitor.width);
+  const largestMonitor = [...layout.monitors].sort((left, right) =>
+    right.width * right.height - left.width * left.height
+  )[0];
+  const largestIndex = Math.max(0, layout.monitors.findIndex(monitor => monitor.id === largestMonitor?.id));
+  const focusNames = {
+    automatic: `innerhalb von Monitor ${largestIndex + 1}, mit Abstand zu allen Bildschirmkanten`,
+    left: "im linken Drittel einer sichtbaren Monitorfläche",
+    center: "mittig innerhalb einer einzelnen Monitorfläche, nicht auf einem Übergang",
+    right: "im rechten Drittel einer sichtbaren Monitorfläche",
+    distributed: "als mehrere visuelle Schwerpunkte, jeweils innerhalb einer eigenen Monitorfläche"
+  };
+  const styleNames = {
+    cinematic: "filmisch, atmosphärisch, detailreich, hochwertige Lichtsetzung",
+    photorealistic: "fotorealistisch, natürliche Materialien, glaubwürdige Beleuchtung",
+    "digital-art": "hochwertige digitale Kunst, detailreich, klare Formen",
+    illustration: "ausdrucksstarke Illustration, harmonische Formen und Farben",
+    minimal: "minimalistisch, ruhige Flächen, wenige klar platzierte Elemente",
+    abstract: "abstrakte Kunst, fließende Formen, räumliche Tiefe",
+    anime: "hochwertiger Anime-Hintergrund, detailreiche Umgebung, filmische Komposition"
+  };
+  const moodNames = {
+    dramatic: "dramatische Stimmung mit starkem Licht und Tiefe",
+    calm: "ruhige, ausgeglichene Stimmung",
+    bright: "helle, freundliche und offene Stimmung",
+    dark: "dunkle, kontrastreiche Stimmung",
+    colorful: "farbenreiche, lebendige Stimmung",
+    elegant: "elegante, zurückhaltende und hochwertige Stimmung"
+  };
+  const transitions = Math.max(0, layout.monitors.length - 1);
+  const orientationDescription = layout.monitors
+    .map((monitor, index) => `Monitor ${index + 1}: ${monitor.width > monitor.height ? "Querformat" : "Hochformat"}`)
+    .join(", ");
+  const portraitHint = portraitMonitors.length
+    ? `Der Bereich von ${portraitMonitors.map(item => `Monitor ${item.index + 1}`).join(" und ")} muss als eigenständige vertikale Komposition funktionieren.`
+    : "Alle sichtbaren Bereiche sind im Querformat angeordnet.";
+  const avoid = ["Text", "Logos", "Wasserzeichen", "abgeschnittene Hauptmotive an Bildschirmübergängen"];
+  if (state.ai.avoid.trim()) avoid.push(state.ai.avoid.trim());
+  const subject = state.ai.subject.trim() || "ein visuell eindrucksvolles, zusammenhängendes Panorama";
+
+  const prompt = [
+    `Erstelle ein ${styleNames[state.ai.style]} Wallpaper: ${subject}.`,
+    `${moodNames[state.ai.mood]}.`,
+    `Komposition für eine Monitorwand mit ${layout.monitors.length} Monitor${layout.monitors.length === 1 ? "" : "en"} und einem Gesamtseitenverhältnis von ${ratio.toFixed(2)}:1.`,
+    `Zielauflösung mindestens ${nativeWidth} × ${nativeHeight} Pixel, ideal ${idealWidth} × ${idealHeight} Pixel.`,
+    `Monitoranordnung: ${orientationDescription}. ${portraitHint}`,
+    `Das wichtigste Motiv liegt ${focusNames[state.ai.focus]}.`,
+    `Wichtige Gesichter, Schrift, Augen, Fahrzeuge und klare geometrische Objekte vollständig innerhalb einzelner Monitorflächen platzieren.`,
+    `Zwischen den Monitoren liegen ${transitions} physische Übergang${transitions === 1 ? "" : "e"} mit Rahmenkorrektur. Dort nur unkritische Hintergründe, Himmel, Nebel, Wasser, Boden, Lichtspuren oder fortlaufende Texturen verwenden.`,
+    `Das Bild muss an allen sichtbaren Außenkanten natürlich weiterwirken und darf keine dekorativen Bildrahmen enthalten.`,
+    `Vermeiden: ${avoid.join(", ")}.`
+  ].join("\n\n");
+
+  return {
+    layout,
+    nativeWidth,
+    nativeHeight,
+    idealWidth,
+    idealHeight,
+    ratio,
+    portraitCount: portraitMonitors.length,
+    prompt
+  };
+}
+
+function updateAIAssistant() {
+  if (!elements.aiPrompt || !state.monitors.length) return;
+  const plan = aiWallpaperPlan();
+  elements.aiPrompt.value = plan.prompt;
+  elements.aiRecommendation.innerHTML = `
+    <div><span>Mindestgröße</span><strong>${plan.nativeWidth} × ${plan.nativeHeight} px</strong></div>
+    <div><span>Ideal</span><strong>${plan.idealWidth} × ${plan.idealHeight} px</strong></div>
+    <div><span>Seitenverhältnis</span><strong>${plan.ratio.toFixed(2)} : 1</strong></div>
+    <div><span>Ausrichtung</span><strong>${plan.portraitCount ? `${plan.portraitCount} × Hochformat` : "Nur Querformat"}</strong></div>
+  `;
+}
+
+async function copyAIPrompt() {
+  updateAIAssistant();
+  try {
+    await navigator.clipboard.writeText(elements.aiPrompt.value);
+    showToast("Der KI-Prompt wurde kopiert.");
+  } catch {
+    elements.aiPrompt.select();
+    document.execCommand("copy");
+    showToast("Der KI-Prompt wurde kopiert.");
+  }
+}
+
+function downloadCompositionMask() {
+  const plan = aiWallpaperPlan();
+  const maxDimension = 3200;
+  const scale = Math.min(1, maxDimension / Math.max(plan.layout.width, plan.layout.height));
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.round(plan.layout.width * scale));
+  canvas.height = Math.max(1, Math.round(plan.layout.height * scale));
+  const context = canvas.getContext("2d");
+
+  context.fillStyle = "#1a1a1a";
+  context.fillRect(0, 0, canvas.width, canvas.height);
+
+  plan.layout.monitors.forEach((monitor, index) => {
+    const x = monitor.sourceX * scale;
+    const y = monitor.sourceY * scale;
+    const width = monitor.width * scale;
+    const height = monitor.height * scale;
+    const inset = Math.max(8, Math.min(width, height) * 0.06);
+
+    context.fillStyle = index % 2 ? "#29231e" : "#242424";
+    context.fillRect(x, y, width, height);
+    context.strokeStyle = "#ff8c00";
+    context.lineWidth = Math.max(2, 4 * scale);
+    context.strokeRect(x, y, width, height);
+    context.setLineDash([12, 8]);
+    context.strokeStyle = "rgba(255,255,255,.48)";
+    context.strokeRect(x + inset, y + inset, width - inset * 2, height - inset * 2);
+    context.setLineDash([]);
+
+    context.fillStyle = "#fff8ef";
+    context.font = `700 ${Math.max(14, Math.round(24 * scale))}px Segoe UI`;
+    context.fillText(`Monitor ${index + 1}`, x + inset, y + inset + Math.max(18, 28 * scale));
+    context.fillStyle = "#ffb15a";
+    context.font = `${Math.max(11, Math.round(16 * scale))}px Segoe UI`;
+    context.fillText(
+      `${monitor.width > monitor.height ? "Querformat" : "Hochformat"} · sichere Motivfläche gestrichelt`,
+      x + inset,
+      y + inset + Math.max(38, 52 * scale)
+    );
+  });
+
+  canvas.toBlob(blob => {
+    if (!blob) return;
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `monitorcanvas-kompositionsmaske-${plan.nativeWidth}x${plan.nativeHeight}.png`;
+    anchor.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    showToast("Die Kompositionsmaske wurde erstellt.");
+  }, "image/png");
 }
 
 function buildExportCanvas() {
@@ -821,6 +994,7 @@ function projectData() {
       gaps: state.gaps,
       frames: state.frames,
       verticalOffsets: state.verticalOffsets,
+      ai: state.ai,
       imageLayout: state.images.map(image => ({
         name: image.name,
         placement: image.placement,
@@ -871,7 +1045,13 @@ async function openProject(file) {
 function syncControls() {
   document.querySelector("#fitMode").value = state.fitMode;
   document.querySelector("#screenDiagonal").value = state.diagonal;
+  elements.aiSubject.value = state.ai.subject;
+  elements.aiStyle.value = state.ai.style;
+  elements.aiMood.value = state.ai.mood;
+  elements.aiFocus.value = state.ai.focus;
+  elements.aiAvoid.value = state.ai.avoid;
   syncActiveImageControls();
+  updateAIAssistant();
 }
 
 function updateSliderOutputs() {
@@ -1100,8 +1280,24 @@ function bindEvents() {
     state.diagonal = Math.max(10, Number(event.target.value) || 27);
     queueRender();
   });
+  [
+    [elements.aiSubject, "subject"],
+    [elements.aiStyle, "style"],
+    [elements.aiMood, "mood"],
+    [elements.aiFocus, "focus"],
+    [elements.aiAvoid, "avoid"]
+  ].forEach(([element, key]) => {
+    element.addEventListener("input", event => {
+      state.ai[key] = event.target.value;
+      updateAIAssistant();
+      schedulePersistence();
+    });
+  });
+
   document.querySelector("#refreshMonitorsButton").addEventListener("click", loadMonitors);
   document.querySelector("#arrangeImagesButton").addEventListener("click", arrangeImagesSideBySide);
+  document.querySelector("#copyPromptButton").addEventListener("click", copyAIPrompt);
+  document.querySelector("#downloadMaskButton").addEventListener("click", downloadCompositionMask);
   document.querySelector("#downloadButton").addEventListener("click", downloadWallpaper);
   document.querySelector("#applyButton").addEventListener("click", applyWallpaper);
   document.querySelector("#saveProjectButton").addEventListener("click", saveProject);

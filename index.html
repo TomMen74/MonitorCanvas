@@ -39,9 +39,10 @@
 
       <nav class="steps" aria-label="Arbeitsschritte">
         <button class="step active" data-step="images" type="button"><span>1</span>Bilder</button>
-        <button class="step" data-step="monitors" type="button"><span>2</span>Monitore</button>
-        <button class="step" data-step="frames" type="button"><span>3</span>Rahmen</button>
-        <button class="step" data-step="preview" type="button"><span>4</span>Vorschau</button>
+        <button class="step" data-step="ai" type="button"><span>2</span>KI-Assistent</button>
+        <button class="step" data-step="monitors" type="button"><span>3</span>Monitore</button>
+        <button class="step" data-step="frames" type="button"><span>4</span>Rahmen</button>
+        <button class="step" data-step="preview" type="button"><span>5</span>Vorschau</button>
       </nav>
 
       <div class="workspace">
@@ -90,6 +91,74 @@
               <label for="offsetY">Vertikal <output id="offsetYOutput">0 %</output></label>
               <input id="offsetY" type="range" min="-100" max="100" value="0">
             </div>
+          </section>
+
+          <section class="panel-section step-panel" data-panel="ai">
+            <div class="section-heading">
+              <div>
+                <p class="eyebrow">Ideenwerkstatt</p>
+                <h2>KI-Wallpaper planen</h2>
+              </div>
+              <span class="count-badge">AI</span>
+            </div>
+            <p class="helper">Beschreibe dein Motiv. MonitorCanvas ergänzt die technischen Vorgaben deiner Monitorwand. Es wird kein Konto und kein API-Schlüssel benötigt.</p>
+
+            <div class="field-group">
+              <label for="aiSubject">Was soll zu sehen sein?</label>
+              <textarea id="aiSubject" rows="4" placeholder="Zum Beispiel: futuristische Stadt bei Nacht mit nassen Straßen"></textarea>
+            </div>
+
+            <div class="ai-grid">
+              <div class="field-group">
+                <label for="aiStyle">Bildstil</label>
+                <select id="aiStyle">
+                  <option value="cinematic">Filmisch</option>
+                  <option value="photorealistic">Fotorealistisch</option>
+                  <option value="digital-art">Digitale Kunst</option>
+                  <option value="illustration">Illustration</option>
+                  <option value="minimal">Minimalistisch</option>
+                  <option value="abstract">Abstrakt</option>
+                  <option value="anime">Anime</option>
+                </select>
+              </div>
+              <div class="field-group">
+                <label for="aiMood">Stimmung</label>
+                <select id="aiMood">
+                  <option value="dramatic">Dramatisch</option>
+                  <option value="calm">Ruhig</option>
+                  <option value="bright">Hell & freundlich</option>
+                  <option value="dark">Dunkel</option>
+                  <option value="colorful">Farbenreich</option>
+                  <option value="elegant">Elegant</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="field-group">
+              <label for="aiFocus">Wichtigstes Motiv</label>
+              <select id="aiFocus">
+                <option value="automatic">Automatisch sicher platzieren</option>
+                <option value="left">Links</option>
+                <option value="center">Mittig</option>
+                <option value="right">Rechts</option>
+                <option value="distributed">Über die Fläche verteilen</option>
+              </select>
+            </div>
+
+            <div class="field-group">
+              <label for="aiAvoid">Zusätzlich vermeiden</label>
+              <input id="aiAvoid" type="text" placeholder="z. B. Text, Logos, Gesichter">
+            </div>
+
+            <div id="aiRecommendation" class="ai-recommendation"></div>
+
+            <div class="field-group">
+              <label for="aiPrompt">Fertiger Prompt</label>
+              <textarea id="aiPrompt" class="prompt-output" rows="11" readonly></textarea>
+            </div>
+
+            <button id="copyPromptButton" class="button button-primary button-full" type="button">Prompt kopieren</button>
+            <button id="downloadMaskButton" class="button button-secondary button-full" type="button">Kompositionsmaske herunterladen</button>
           </section>
 
           <section class="panel-section step-panel" data-panel="monitors">
