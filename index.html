@@ -64,8 +64,13 @@
 
             <div id="imageList" class="image-list"></div>
 
+            <button id="arrangeImagesButton" class="button button-secondary button-full" type="button">
+              Bilder nebeneinander anordnen
+            </button>
+            <p class="fine-print stitch-help">In der Monitorwand ein Bild anklicken und frei verschieben. Es rastet an jeder Kante anderer Bilder ein. Mit gedrückter Umschalttaste bleibt das Einrasten aus.</p>
+
             <div class="field-group">
-              <label for="fitMode">Bildanpassung</label>
+              <label for="fitMode">Ausgewähltes Bild einpassen</label>
               <select id="fitMode">
                 <option value="cover">Fläche füllen</option>
                 <option value="contain">Vollständig anzeigen</option>
@@ -104,8 +109,9 @@
                 <p class="eyebrow">Feinjustierung</p>
                 <h2>Rahmen & Abstände</h2>
               </div>
+              <span id="frameMonitorCount" class="count-badge">0</span>
             </div>
-            <p class="helper">Trage die sichtbare Unterbrechung zwischen benachbarten Monitoren in Millimetern ein.</p>
+            <p class="helper">Jeder Monitor hat eigene Werte für oben, rechts, unten und links. Markierte Seiten werden gemeinsam geändert.</p>
             <div class="field-group">
               <label for="screenDiagonal">Referenz-Bildschirmgröße</label>
               <div class="input-suffix">
@@ -113,14 +119,7 @@
                 <span>Zoll</span>
               </div>
             </div>
-            <label class="toggle-row">
-              <span>
-                <strong>Gleiche Rahmen verwenden</strong>
-                <small>Ein Wert für alle Übergänge</small>
-              </span>
-              <input id="uniformFrames" type="checkbox" checked>
-            </label>
-            <div id="gapControls" class="gap-controls"></div>
+            <div id="frameControls" class="frame-controls"></div>
           </section>
 
           <section class="panel-section step-panel" data-panel="preview">

@@ -7,8 +7,8 @@ const state = {
   offsetX: 0,
   offsetY: 0,
   diagonal: 27,
-  uniformFrames: true,
   gaps: {},
+  frames: {},
   verticalOffsets: {},
   view: "real"
 };
@@ -23,7 +23,8 @@ const elements = {
   monitorList: document.querySelector("#monitorList"),
   monitorCount: document.querySelector("#monitorCount"),
   systemStatus: document.querySelector("#systemStatus"),
-  gapControls: document.querySelector("#gapControls"),
+  frameControls: document.querySelector("#frameControls"),
+  frameMonitorCount: document.querySelector("#frameMonitorCount"),
   qualityNotice: document.querySelector("#qualityNotice"),
   exportSize: document.querySelector("#exportSize"),
   toast: document.querySelector("#toast"),
@@ -32,6 +33,144 @@ const elements = {
 
 let renderQueued = false;
 let toastTimer;
+let persistenceTimer;
+let previewGeometry = null;
+let dragState = null;
+
+const SESSION_KEY = "monitorCanvas.session.v2";
+const IMAGE_DATABASE = "monitorCanvas.images";
+
+function openImageDatabase() {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(IMAGE_DATABASE, 1);
+    request.onupgradeneeded = () => {
+      const database = request.result;
+      if (!database.objectStoreNames.contains("images")) {
+        database.createObjectStore("images", { keyPath: "id" });
+      }
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+async function writeImageBlob(id, file) {
+  const database = await openImageDatabase();
+  await new Promise((resolve, reject) => {
+    const transaction = database.transaction("images", "readwrite");
+    transaction.objectStore("images").put({
+      id,
+      name: file.name,
+      type: file.type,
+      blob: file
+    });
+    transaction.oncomplete = resolve;
+    transaction.onerror = () => reject(transaction.error);
+  });
+  database.close();
+}
+
+async function removeImageBlob(id) {
+  const database = await openImageDatabase();
+  await new Promise((resolve, reject) => {
+    const transaction = database.transaction("images", "readwrite");
+    transaction.objectStore("images").delete(id);
+    transaction.oncomplete = resolve;
+    transaction.onerror = () => reject(transaction.error);
+  });
+  database.close();
+}
+
+async function readImageBlobs() {
+  const database = await openImageDatabase();
+  const records = await new Promise((resolve, reject) => {
+    const transaction = database.transaction("images", "readonly");
+    const request = transaction.objectStore("images").getAll();
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+  database.close();
+  return new Map(records.map(record => [record.id, record]));
+}
+
+function serializableSession() {
+  return {
+    version: 2,
+    activeImageId: state.activeImageId,
+    fitMode: state.fitMode,
+    diagonal: state.diagonal,
+    gaps: state.gaps,
+    frames: state.frames,
+    verticalOffsets: state.verticalOffsets,
+    view: state.view,
+    images: state.images.map(image => ({
+      id: image.id,
+      name: image.name,
+      width: image.width,
+      height: image.height,
+      placement: image.placement,
+      basePlacement: image.basePlacement,
+      zoom: image.zoom
+    }))
+  };
+}
+
+function persistSessionNow() {
+  try {
+    localStorage.setItem(SESSION_KEY, JSON.stringify(serializableSession()));
+  } catch (error) {
+    console.warn("MonitorCanvas konnte die Sitzung nicht speichern.", error);
+  }
+}
+
+function schedulePersistence() {
+  clearTimeout(persistenceTimer);
+  persistenceTimer = setTimeout(persistSessionNow, 120);
+}
+
+async function restoreSession() {
+  const raw = localStorage.getItem(SESSION_KEY);
+  if (!raw) return;
+
+  try {
+    const saved = JSON.parse(raw);
+    if (saved.version !== 2) return;
+    state.fitMode = saved.fitMode ?? state.fitMode;
+    state.diagonal = saved.diagonal ?? state.diagonal;
+    state.gaps = saved.gaps ?? {};
+    state.frames = saved.frames ?? {};
+    state.verticalOffsets = saved.verticalOffsets ?? {};
+    state.view = saved.view ?? "real";
+
+    const blobs = await readImageBlobs();
+    const restoredImages = [];
+    for (const metadata of saved.images ?? []) {
+      const record = blobs.get(metadata.id);
+      if (!record?.blob) continue;
+      const url = URL.createObjectURL(record.blob);
+      const imageElement = new Image();
+      imageElement.src = url;
+      await imageElement.decode();
+      restoredImages.push({
+        ...metadata,
+        name: record.name || metadata.name,
+        width: imageElement.naturalWidth,
+        height: imageElement.naturalHeight,
+        url,
+        image: imageElement
+      });
+    }
+    state.images = restoredImages;
+    state.activeImageId = restoredImages.some(image => image.id === saved.activeImageId)
+      ? saved.activeImageId
+      : restoredImages.at(-1)?.id ?? null;
+    renderImageList();
+    syncControls();
+    syncViewControls();
+  } catch (error) {
+    console.warn("Die letzte MonitorCanvas-Sitzung konnte nicht geladen werden.", error);
+  }
+}
 
 function showToast(message) {
   elements.toast.textContent = message;
@@ -57,9 +196,8 @@ function transitionKey(left, right) {
   return `${left.id}::${right.id}`;
 }
 
-function getGapMillimeters(left, right) {
-  const key = state.uniformFrames ? "uniform" : transitionKey(left, right);
-  return Number(state.gaps[key] ?? 20);
+function frameMillimeters(monitor, side) {
+  return Number(state.frames?.[monitor.id]?.[side] ?? 0);
 }
 
 function pixelsPerMillimeter(monitor) {
@@ -71,27 +209,61 @@ function physicalLayout() {
   const monitors = sortedMonitors();
   if (!monitors.length) return { monitors: [], width: 1, height: 1 };
   const bounds = monitorBounds();
-  let addedX = 0;
-  const rawLayouts = [];
+  const horizontalTransitions = [];
+  const verticalTransitions = [];
 
-  monitors.forEach((monitor, index) => {
-    if (index > 0) {
-      const previous = monitors[index - 1];
-      const gapMm = getGapMillimeters(previous, monitor);
-      const averageDensity = (pixelsPerMillimeter(previous) + pixelsPerMillimeter(monitor)) / 2;
-      addedX += gapMm * averageDensity;
+  for (const first of monitors) {
+    for (const second of monitors) {
+      if (first.id === second.id) continue;
+      const verticalOverlap = Math.min(first.y + first.height, second.y + second.height) - Math.max(first.y, second.y);
+      const horizontalOverlap = Math.min(first.x + first.width, second.x + second.width) - Math.max(first.x, second.x);
+      const density = (pixelsPerMillimeter(first) + pixelsPerMillimeter(second)) / 2;
+
+      if (Math.abs(first.x + first.width - second.x) <= 2 && verticalOverlap > 0) {
+        horizontalTransitions.push({
+          boundary: second.x,
+          pixels: (frameMillimeters(first, "right") + frameMillimeters(second, "left")) * density
+        });
+      }
+      if (Math.abs(first.y + first.height - second.y) <= 2 && horizontalOverlap > 0) {
+        verticalTransitions.push({
+          boundary: second.y,
+          pixels: (frameMillimeters(first, "bottom") + frameMillimeters(second, "top")) * density
+        });
+      }
     }
+  }
+
+  const uniqueTransitions = transitions => {
+    const grouped = new Map();
+    transitions.forEach(transition => {
+      grouped.set(transition.boundary, Math.max(grouped.get(transition.boundary) ?? 0, transition.pixels));
+    });
+    return [...grouped].map(([boundary, pixels]) => ({ boundary, pixels }));
+  };
+  const horizontal = uniqueTransitions(horizontalTransitions);
+  const vertical = uniqueTransitions(verticalTransitions);
+
+  const rawLayouts = monitors.map(monitor => {
+    const addedX = horizontal
+      .filter(transition => transition.boundary <= monitor.x)
+      .reduce((sum, transition) => sum + transition.pixels, 0);
+    const addedY = vertical
+      .filter(transition => transition.boundary <= monitor.y)
+      .reduce((sum, transition) => sum + transition.pixels, 0);
     const verticalOffset = Number(state.verticalOffsets[monitor.id] ?? 0);
-    rawLayouts.push({
+    return {
       ...monitor,
       sourceX: monitor.x - bounds.minX + addedX,
-      sourceY: monitor.y - bounds.minY + verticalOffset * pixelsPerMillimeter(monitor)
-    });
+      sourceY: monitor.y - bounds.minY + addedY + verticalOffset * pixelsPerMillimeter(monitor)
+    };
   });
 
+  const minSourceX = Math.min(...rawLayouts.map(monitor => monitor.sourceX));
   const minSourceY = Math.min(...rawLayouts.map(monitor => monitor.sourceY));
   const layouts = rawLayouts.map(monitor => ({
     ...monitor,
+    sourceX: monitor.sourceX - minSourceX,
     sourceY: monitor.sourceY - minSourceY
   }));
   const width = Math.max(...layouts.map(m => m.sourceX + m.width));
@@ -123,21 +295,35 @@ async function loadMonitors() {
     elements.systemStatus.textContent = "Vorschaumodus";
     showToast("Der lokale Dienst ist nicht erreichbar. Die Vorschau nutzt einen Beispielmonitor.");
   }
-  ensureGapDefaults();
+  ensureFrameDefaults();
   ensureVerticalOffsetDefaults();
   renderMonitorList();
-  renderGapControls();
+  renderFrameControls();
   updateSummary();
+  syncActiveImageControls();
   queueRender();
 }
 
-function ensureGapDefaults() {
-  if (state.gaps.uniform == null) state.gaps.uniform = 20;
-  const monitors = sortedMonitors();
-  for (let index = 1; index < monitors.length; index++) {
-    const key = transitionKey(monitors[index - 1], monitors[index]);
-    if (state.gaps[key] == null) state.gaps[key] = 20;
+function ensureFrameDefaults() {
+  if (!state.frames || typeof state.frames !== "object") {
+    state.frames = {};
   }
+  state.monitors.forEach(monitor => {
+    if (!state.frames[monitor.id]) {
+      const migratedHalfGap = Number(state.gaps?.uniform ?? 0) / 2;
+      state.frames[monitor.id] = {
+        top: migratedHalfGap,
+        right: migratedHalfGap,
+        bottom: migratedHalfGap,
+        left: migratedHalfGap
+      };
+    }
+    for (const side of ["top", "right", "bottom", "left"]) {
+      if (state.frames[monitor.id][side] == null) {
+        state.frames[monitor.id][side] = 0;
+      }
+    }
+  });
 }
 
 function ensureVerticalOffsetDefaults() {
@@ -195,38 +381,81 @@ function formatVerticalOffset(value) {
   return `${Math.abs(value).toFixed(0)} mm ${value < 0 ? "höher" : "tiefer"}`;
 }
 
-function renderGapControls() {
-  elements.gapControls.innerHTML = "";
-  const monitors = sortedMonitors();
-  if (monitors.length < 2) {
-    elements.gapControls.innerHTML = '<p class="helper">Für einen einzelnen Monitor ist keine Rahmenkorrektur nötig.</p>';
-    return;
-  }
+function renderFrameControls() {
+  elements.frameControls.innerHTML = "";
+  elements.frameMonitorCount.textContent = state.monitors.length;
+  const sideLabels = {
+    top: "Oben",
+    right: "Rechts",
+    bottom: "Unten",
+    left: "Links"
+  };
 
-  const transitions = state.uniformFrames
-    ? [{ key: "uniform", label: "Alle Übergänge" }]
-    : monitors.slice(1).map((monitor, index) => ({
-        key: transitionKey(monitors[index], monitor),
-        label: `Monitor ${index + 1} → Monitor ${index + 2}`
-      }));
-
-  transitions.forEach(transition => {
-    const wrapper = document.createElement("div");
-    wrapper.className = "gap-control";
-    wrapper.innerHTML = `
-      <label for="gap-${safeId(transition.key)}">
-        <span>${transition.label}</span>
-        <strong>${Number(state.gaps[transition.key] ?? 20).toFixed(1)} mm</strong>
-      </label>
-      <input id="gap-${safeId(transition.key)}" type="range" min="0" max="100" step="0.5" value="${state.gaps[transition.key] ?? 20}">
+  sortedMonitors().forEach((monitor, index) => {
+    const card = document.createElement("article");
+    card.className = "frame-monitor-card";
+    card.innerHTML = `
+      <header>
+        <div>
+          <strong>Monitor ${index + 1}</strong>
+          <span>${monitor.width > monitor.height ? "Querformat" : "Hochformat"} · ${monitor.width} × ${monitor.height}</span>
+        </div>
+        <small>${escapeHtml(monitor.name)}</small>
+      </header>
+      <div class="frame-link-heading">
+        <span>Seiten gemeinsam ändern</span>
+        <small>Markieren zum Koppeln</small>
+      </div>
+      <div class="frame-links">
+        ${Object.entries(sideLabels).map(([side, label]) => `
+          <label>
+            <input type="checkbox" data-link-side="${side}" ${side === "bottom" ? "" : "checked"}>
+            <span>${label}</span>
+          </label>
+        `).join("")}
+      </div>
+      <div class="frame-side-list">
+        ${Object.entries(sideLabels).map(([side, label]) => {
+          const value = Number(state.frames[monitor.id][side] ?? 0);
+          const inputId = `frame-${safeId(monitor.id)}-${side}`;
+          return `
+            <div class="frame-side-row" data-side="${side}">
+              <label for="${inputId}">${label}</label>
+              <input id="${inputId}" class="frame-range" type="range" min="0" max="80" step="0.5" value="${value}">
+              <div class="frame-number">
+                <input type="number" min="0" max="80" step="0.5" value="${value}">
+                <span>mm</span>
+              </div>
+            </div>
+          `;
+        }).join("")}
+      </div>
     `;
-    const input = wrapper.querySelector("input");
-    input.addEventListener("input", () => {
-      state.gaps[transition.key] = Number(input.value);
-      wrapper.querySelector("strong").textContent = `${Number(input.value).toFixed(1)} mm`;
+
+    const applyValue = (sourceSide, rawValue) => {
+      const value = Math.max(0, Math.min(80, Number(rawValue) || 0));
+      const linkedSides = [...card.querySelectorAll("[data-link-side]:checked")]
+        .map(input => input.dataset.linkSide);
+      const targetSides = linkedSides.includes(sourceSide) ? linkedSides : [sourceSide];
+      targetSides.forEach(side => {
+        state.frames[monitor.id][side] = value;
+        const row = card.querySelector(`[data-side="${side}"]`);
+        row.querySelector(".frame-range").value = value;
+        row.querySelector('input[type="number"]').value = value;
+      });
       queueRender();
+    };
+
+    card.querySelectorAll(".frame-side-row").forEach(row => {
+      const side = row.dataset.side;
+      row.querySelector(".frame-range").addEventListener("input", event => {
+        applyValue(side, event.target.value);
+      });
+      row.querySelector('input[type="number"]').addEventListener("input", event => {
+        applyValue(side, event.target.value);
+      });
     });
-    elements.gapControls.append(wrapper);
+    elements.frameControls.append(card);
   });
 }
 
@@ -242,23 +471,38 @@ function escapeHtml(value) {
 
 async function addImages(files) {
   const accepted = [...files].filter(file => /^image\/(png|jpeg|webp)$/.test(file.type));
+  const newImages = [];
   for (const file of accepted) {
     const url = URL.createObjectURL(file);
     const image = new Image();
     image.src = url;
     await image.decode();
+    const id = crypto.randomUUID();
     const item = {
-      id: crypto.randomUUID(),
+      id,
       name: file.name,
       width: image.naturalWidth,
       height: image.naturalHeight,
       url,
-      image
+      image,
+      placement: null,
+      basePlacement: null,
+      zoom: 1
     };
     state.images.push(item);
+    newImages.push(item);
     state.activeImageId = item.id;
+    await writeImageBlob(id, file);
+  }
+
+  if (accepted.length > 1 || (newImages.length && state.images.length > 1)) {
+    arrangeImagesSideBySide();
+  } else if (newImages.length === 1) {
+    resetImageFit(newImages[0], state.fitMode);
   }
   renderImageList();
+  syncActiveImageControls();
+  schedulePersistence();
   queueRender();
 }
 
@@ -283,37 +527,65 @@ function renderImageList() {
     item.addEventListener("click", () => {
       state.activeImageId = image.id;
       renderImageList();
+      syncActiveImageControls();
+      schedulePersistence();
       queueRender();
     });
-    item.querySelector("button").addEventListener("click", event => {
+    item.querySelector("button").addEventListener("click", async event => {
       event.stopPropagation();
       URL.revokeObjectURL(image.url);
       state.images = state.images.filter(candidate => candidate.id !== image.id);
       if (state.activeImageId === image.id) state.activeImageId = state.images.at(-1)?.id ?? null;
+      await removeImageBlob(image.id);
       renderImageList();
+      syncActiveImageControls();
+      schedulePersistence();
       queueRender();
     });
     elements.imageList.append(item);
   });
 }
 
-function imageDrawRect(image, targetWidth, targetHeight) {
-  let scaleX = targetWidth / image.width;
-  let scaleY = targetHeight / image.height;
-  if (state.fitMode === "cover") scaleX = scaleY = Math.max(scaleX, scaleY);
-  if (state.fitMode === "contain") scaleX = scaleY = Math.min(scaleX, scaleY);
-  scaleX *= state.zoom;
-  scaleY *= state.zoom;
-  const width = image.width * scaleX;
-  const height = image.height * scaleY;
-  const freeX = targetWidth - width;
-  const freeY = targetHeight - height;
-  return {
-    x: freeX / 2 + state.offsetX * targetWidth * 0.35,
-    y: freeY / 2 + state.offsetY * targetHeight * 0.35,
+function resetImageFit(image, mode = state.fitMode) {
+  const layout = physicalLayout();
+  let width = layout.width;
+  let height = layout.height;
+  if (mode !== "stretch") {
+    const scale = mode === "contain"
+      ? Math.min(layout.width / image.width, layout.height / image.height)
+      : Math.max(layout.width / image.width, layout.height / image.height);
+    width = image.width * scale;
+    height = image.height * scale;
+  }
+  image.basePlacement = {
+    x: (layout.width - width) / 2,
+    y: (layout.height - height) / 2,
     width,
     height
   };
+  image.placement = { ...image.basePlacement };
+  image.zoom = 1;
+}
+
+function arrangeImagesSideBySide() {
+  if (!state.images.length) return;
+  const layout = physicalLayout();
+  const aspectSum = state.images.reduce((sum, image) => sum + image.width / image.height, 0);
+  const commonHeight = Math.min(layout.height, layout.width / Math.max(aspectSum, 0.01));
+  const totalWidth = commonHeight * aspectSum;
+  let x = (layout.width - totalWidth) / 2;
+  const y = (layout.height - commonHeight) / 2;
+
+  state.images.forEach(image => {
+    const width = commonHeight * image.width / image.height;
+    image.basePlacement = { x, y, width, height: commonHeight };
+    image.placement = { ...image.basePlacement };
+    image.zoom = 1;
+    x += width;
+  });
+  syncActiveImageControls();
+  schedulePersistence();
+  queueRender();
 }
 
 function buildSourceCanvas(layout, scale = 1) {
@@ -323,23 +595,24 @@ function buildSourceCanvas(layout, scale = 1) {
   const context = canvas.getContext("2d");
   context.fillStyle = "#11151b";
   context.fillRect(0, 0, canvas.width, canvas.height);
-  const selected = activeImage();
-  if (selected) {
-    const rect = imageDrawRect(selected, layout.width, layout.height);
+  state.images.forEach(sourceImage => {
+    if (!sourceImage.placement) resetImageFit(sourceImage, state.fitMode);
+    const rect = sourceImage.placement;
     context.imageSmoothingEnabled = true;
     context.imageSmoothingQuality = "high";
     context.drawImage(
-      selected.image,
+      sourceImage.image,
       rect.x * scale,
       rect.y * scale,
       rect.width * scale,
       rect.height * scale
     );
-  }
+  });
   return canvas;
 }
 
 function queueRender() {
+  schedulePersistence();
   if (renderQueued) return;
   renderQueued = true;
   requestAnimationFrame(() => {
@@ -364,6 +637,7 @@ function renderPreview() {
   const previewScale = Math.min((width - padding * 2) / layout.width, (height - padding * 2) / layout.height);
   const originX = (width - layout.width * previewScale) / 2;
   const originY = (height - layout.height * previewScale) / 2;
+  previewGeometry = { layout, previewScale, originX, originY };
   const source = buildSourceCanvas(layout, Math.max(0.1, previewScale));
 
   context.save();
@@ -391,7 +665,7 @@ function renderPreview() {
       w,
       h
     );
-    context.strokeStyle = state.view === "technical" ? "#c8ff3d" : "#3f4651";
+    context.strokeStyle = state.view === "technical" ? "#ff8c00" : "#51483e";
     context.lineWidth = state.view === "technical" ? 1.5 : 1;
     context.strokeRect(x, y, w, h);
 
@@ -425,6 +699,28 @@ function renderPreview() {
     }
   }
 
+  const selected = activeImage();
+  if (selected?.placement) {
+    const rect = selected.placement;
+    const x = originX + rect.x * previewScale;
+    const y = originY + rect.y * previewScale;
+    const w = rect.width * previewScale;
+    const h = rect.height * previewScale;
+    context.save();
+    context.setLineDash([7, 5]);
+    context.strokeStyle = "#ff8c00";
+    context.lineWidth = 2;
+    context.shadowColor = "rgba(0,0,0,.7)";
+    context.shadowBlur = 4;
+    context.strokeRect(x, y, w, h);
+    context.setLineDash([]);
+    context.fillStyle = "#ff8c00";
+    context.font = "700 11px Segoe UI";
+    const label = selected.name.length > 26 ? `${selected.name.slice(0, 23)}…` : selected.name;
+    context.fillText(label, x + 7, Math.max(14, y - 7));
+    context.restore();
+  }
+
   elements.emptyPreview.hidden = Boolean(activeImage());
   updateQuality(layout);
 }
@@ -436,7 +732,8 @@ function updateQuality(layout) {
     elements.qualityNotice.className = "quality-notice";
     return;
   }
-  const requiredScale = Math.max(layout.width / image.width, layout.height / image.height) * state.zoom;
+  const placement = image.placement ?? { width: layout.width, height: layout.height };
+  const requiredScale = Math.max(placement.width / image.width, placement.height / image.height);
   const good = requiredScale <= 1.15;
   elements.qualityNotice.textContent = good
     ? "Bildauflösung ist ausreichend"
@@ -521,9 +818,15 @@ function projectData() {
       offsetX: state.offsetX,
       offsetY: state.offsetY,
       diagonal: state.diagonal,
-      uniformFrames: state.uniformFrames,
       gaps: state.gaps,
-      verticalOffsets: state.verticalOffsets
+      frames: state.frames,
+      verticalOffsets: state.verticalOffsets,
+      imageLayout: state.images.map(image => ({
+        name: image.name,
+        placement: image.placement,
+        basePlacement: image.basePlacement,
+        zoom: image.zoom
+      }))
     },
     monitorSignature: state.monitors.map(({ id, x, y, width, height }) => ({ id, x, y, width, height })),
     note: "Quellbilder werden aus Datenschutzgründen nicht in der Projektdatei gespeichert."
@@ -545,10 +848,19 @@ async function openProject(file) {
     const project = JSON.parse(await file.text());
     if (project.version !== 1 || !project.settings) throw new Error("Unbekanntes Projektformat.");
     Object.assign(state, project.settings);
+    ensureFrameDefaults();
     ensureVerticalOffsetDefaults();
+    for (const savedImage of project.settings.imageLayout ?? []) {
+      const image = state.images.find(candidate => candidate.name === savedImage.name);
+      if (!image) continue;
+      image.placement = savedImage.placement;
+      image.basePlacement = savedImage.basePlacement;
+      image.zoom = savedImage.zoom ?? 1;
+    }
     syncControls();
+    syncActiveImageControls();
     renderMonitorList();
-    renderGapControls();
+    renderFrameControls();
     queueRender();
     showToast("Projekteinstellungen geladen. Bitte wähle das zugehörige Quellbild.");
   } catch (error) {
@@ -558,18 +870,51 @@ async function openProject(file) {
 
 function syncControls() {
   document.querySelector("#fitMode").value = state.fitMode;
-  document.querySelector("#zoom").value = Math.round(state.zoom * 100);
-  document.querySelector("#offsetX").value = Math.round(state.offsetX * 100);
-  document.querySelector("#offsetY").value = Math.round(state.offsetY * 100);
   document.querySelector("#screenDiagonal").value = state.diagonal;
-  document.querySelector("#uniformFrames").checked = state.uniformFrames;
-  updateSliderOutputs();
+  syncActiveImageControls();
 }
 
 function updateSliderOutputs() {
   document.querySelector("#zoomOutput").textContent = `${Math.round(state.zoom * 100)} %`;
   document.querySelector("#offsetXOutput").textContent = `${Math.round(state.offsetX * 100)} %`;
   document.querySelector("#offsetYOutput").textContent = `${Math.round(state.offsetY * 100)} %`;
+}
+
+function syncActiveImageControls() {
+  const image = activeImage();
+  const controls = [
+    document.querySelector("#fitMode"),
+    document.querySelector("#zoom"),
+    document.querySelector("#offsetX"),
+    document.querySelector("#offsetY")
+  ];
+  controls.forEach(control => {
+    control.disabled = !image;
+  });
+
+  if (!image?.placement) {
+    state.zoom = 1;
+    state.offsetX = 0;
+    state.offsetY = 0;
+  } else {
+    const layout = physicalLayout();
+    state.zoom = image.zoom ?? 1;
+    const centeredX = (layout.width - image.placement.width) / 2;
+    const centeredY = (layout.height - image.placement.height) / 2;
+    state.offsetX = Math.max(-1, Math.min(1, (image.placement.x - centeredX) / (layout.width * 0.35)));
+    state.offsetY = Math.max(-1, Math.min(1, (image.placement.y - centeredY) / (layout.height * 0.35)));
+  }
+
+  document.querySelector("#zoom").value = Math.round(state.zoom * 100);
+  document.querySelector("#offsetX").value = Math.round(state.offsetX * 100);
+  document.querySelector("#offsetY").value = Math.round(state.offsetY * 100);
+  updateSliderOutputs();
+}
+
+function syncViewControls() {
+  document.querySelectorAll(".view-switch button").forEach(button => {
+    button.classList.toggle("active", button.dataset.view === state.view);
+  });
 }
 
 function updateSummary() {
@@ -580,6 +925,113 @@ function updateSummary() {
 function setStep(name) {
   document.querySelectorAll(".step").forEach(button => button.classList.toggle("active", button.dataset.step === name));
   document.querySelectorAll(".step-panel").forEach(panel => panel.classList.toggle("active", panel.dataset.panel === name));
+}
+
+function previewPoint(event) {
+  if (!previewGeometry) return null;
+  const bounds = elements.previewCanvas.getBoundingClientRect();
+  return {
+    x: (event.clientX - bounds.left - previewGeometry.originX) / previewGeometry.previewScale,
+    y: (event.clientY - bounds.top - previewGeometry.originY) / previewGeometry.previewScale
+  };
+}
+
+function imageAtPoint(point) {
+  const selected = activeImage();
+  const candidates = selected
+    ? [selected, ...[...state.images].reverse().filter(image => image.id !== selected.id)]
+    : [...state.images].reverse();
+  return candidates.find(image => {
+    const rect = image.placement;
+    return rect &&
+      point.x >= rect.x &&
+      point.x <= rect.x + rect.width &&
+      point.y >= rect.y &&
+      point.y <= rect.y + rect.height;
+  }) ?? null;
+}
+
+function snapPlacement(image, x, y, disabled) {
+  if (disabled || !previewGeometry) return { x, y };
+  const threshold = 12 / previewGeometry.previewScale;
+  const movingX = [x, x + image.placement.width];
+  const movingY = [y, y + image.placement.height];
+  const targetX = [0, previewGeometry.layout.width];
+  const targetY = [0, previewGeometry.layout.height];
+
+  state.images.forEach(candidate => {
+    if (candidate.id === image.id || !candidate.placement) return;
+    targetX.push(candidate.placement.x, candidate.placement.x + candidate.placement.width);
+    targetY.push(candidate.placement.y, candidate.placement.y + candidate.placement.height);
+  });
+
+  let bestX = { distance: Infinity, correction: 0 };
+  let bestY = { distance: Infinity, correction: 0 };
+  for (const movingEdge of movingX) {
+    for (const targetEdge of targetX) {
+      const correction = targetEdge - movingEdge;
+      if (Math.abs(correction) < bestX.distance) {
+        bestX = { distance: Math.abs(correction), correction };
+      }
+    }
+  }
+  for (const movingEdge of movingY) {
+    for (const targetEdge of targetY) {
+      const correction = targetEdge - movingEdge;
+      if (Math.abs(correction) < bestY.distance) {
+        bestY = { distance: Math.abs(correction), correction };
+      }
+    }
+  }
+
+  return {
+    x: bestX.distance <= threshold ? x + bestX.correction : x,
+    y: bestY.distance <= threshold ? y + bestY.correction : y
+  };
+}
+
+function beginImageDrag(event) {
+  if (event.button !== 0) return;
+  const point = previewPoint(event);
+  if (!point) return;
+  const image = imageAtPoint(point);
+  if (!image) return;
+
+  state.activeImageId = image.id;
+  dragState = {
+    image,
+    startPointer: point,
+    startX: image.placement.x,
+    startY: image.placement.y
+  };
+  elements.previewCanvas.setPointerCapture(event.pointerId);
+  elements.previewCanvas.classList.add("dragging");
+  renderImageList();
+  syncActiveImageControls();
+  queueRender();
+}
+
+function moveImageDrag(event) {
+  if (!dragState) return;
+  const point = previewPoint(event);
+  if (!point) return;
+  const proposedX = dragState.startX + point.x - dragState.startPointer.x;
+  const proposedY = dragState.startY + point.y - dragState.startPointer.y;
+  const snapped = snapPlacement(dragState.image, proposedX, proposedY, event.shiftKey);
+  dragState.image.placement.x = snapped.x;
+  dragState.image.placement.y = snapped.y;
+  syncActiveImageControls();
+  queueRender();
+}
+
+function endImageDrag(event) {
+  if (!dragState) return;
+  if (elements.previewCanvas.hasPointerCapture(event.pointerId)) {
+    elements.previewCanvas.releasePointerCapture(event.pointerId);
+  }
+  elements.previewCanvas.classList.remove("dragging");
+  dragState = null;
+  schedulePersistence();
 }
 
 function bindEvents() {
@@ -605,20 +1057,42 @@ function bindEvents() {
 
   document.querySelector("#fitMode").addEventListener("change", event => {
     state.fitMode = event.target.value;
+    const image = activeImage();
+    if (image) {
+      resetImageFit(image, state.fitMode);
+      syncActiveImageControls();
+    }
     queueRender();
   });
   document.querySelector("#zoom").addEventListener("input", event => {
+    const image = activeImage();
+    if (!image?.placement || !image.basePlacement) return;
+    const previousCenterX = image.placement.x + image.placement.width / 2;
+    const previousCenterY = image.placement.y + image.placement.height / 2;
     state.zoom = Number(event.target.value) / 100;
+    image.zoom = state.zoom;
+    image.placement.width = image.basePlacement.width * state.zoom;
+    image.placement.height = image.basePlacement.height * state.zoom;
+    image.placement.x = previousCenterX - image.placement.width / 2;
+    image.placement.y = previousCenterY - image.placement.height / 2;
     updateSliderOutputs();
     queueRender();
   });
   document.querySelector("#offsetX").addEventListener("input", event => {
+    const image = activeImage();
+    if (!image?.placement) return;
+    const layout = physicalLayout();
     state.offsetX = Number(event.target.value) / 100;
+    image.placement.x = (layout.width - image.placement.width) / 2 + state.offsetX * layout.width * 0.35;
     updateSliderOutputs();
     queueRender();
   });
   document.querySelector("#offsetY").addEventListener("input", event => {
+    const image = activeImage();
+    if (!image?.placement) return;
+    const layout = physicalLayout();
     state.offsetY = Number(event.target.value) / 100;
+    image.placement.y = (layout.height - image.placement.height) / 2 + state.offsetY * layout.height * 0.35;
     updateSliderOutputs();
     queueRender();
   });
@@ -626,20 +1100,20 @@ function bindEvents() {
     state.diagonal = Math.max(10, Number(event.target.value) || 27);
     queueRender();
   });
-  document.querySelector("#uniformFrames").addEventListener("change", event => {
-    state.uniformFrames = event.target.checked;
-    renderGapControls();
-    queueRender();
-  });
-
   document.querySelector("#refreshMonitorsButton").addEventListener("click", loadMonitors);
+  document.querySelector("#arrangeImagesButton").addEventListener("click", arrangeImagesSideBySide);
   document.querySelector("#downloadButton").addEventListener("click", downloadWallpaper);
   document.querySelector("#applyButton").addEventListener("click", applyWallpaper);
   document.querySelector("#saveProjectButton").addEventListener("click", saveProject);
   document.querySelector("#projectInput").addEventListener("change", event => event.target.files[0] && openProject(event.target.files[0]));
+  elements.previewCanvas.addEventListener("pointerdown", beginImageDrag);
+  elements.previewCanvas.addEventListener("pointermove", moveImageDrag);
+  elements.previewCanvas.addEventListener("pointerup", endImageDrag);
+  elements.previewCanvas.addEventListener("pointercancel", endImageDrag);
   window.addEventListener("resize", queueRender);
+  window.addEventListener("beforeunload", persistSessionNow);
 }
 
 bindEvents();
 syncControls();
-loadMonitors();
+restoreSession().finally(loadMonitors);
