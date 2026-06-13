@@ -6,9 +6,9 @@
 
 [![Windows](https://img.shields.io/badge/Windows-10%20%7C%2011-1A1A1A?style=for-the-badge&logo=windows&logoColor=FF8C00)](https://github.com/TomMen74/MonitorCanvas)
 [![Lizenz](https://img.shields.io/badge/Lizenz-MIT-FF8C00?style=for-the-badge)](LICENSE.txt)
-[![Neueste Version](https://img.shields.io/github/v/release/TomMen74/MonitorCanvas?style=for-the-badge&color=FF8C00)](https://github.com/TomMen74/MonitorCanvas/releases/latest)
+[![Windows-Pakete](https://img.shields.io/badge/Download-GitHub%20Actions-FF8C00?style=for-the-badge&logo=githubactions&logoColor=1A1A1A)](https://github.com/TomMen74/MonitorCanvas/actions/workflows/release.yml)
 
-### [Neueste Windows-Version herunterladen](https://github.com/TomMen74/MonitorCanvas/releases/latest)
+### [Windows-Version herunterladen](https://github.com/TomMen74/MonitorCanvas/actions/workflows/release.yml)
 
 </div>
 
@@ -34,8 +34,9 @@ auf dem eigenen Computer.
 
 ## Installation
 
-Auf der Seite [Releases](https://github.com/TomMen74/MonitorCanvas/releases)
-stehen zwei Varianten bereit:
+Nach einem erfolgreichen Lauf unter
+[GitHub Actions](https://github.com/TomMen74/MonitorCanvas/actions/workflows/release.yml)
+stehen unter **Artifacts** zwei Varianten bereit:
 
 | Variante | Geeignet für | Verwendung |
 |---|---|---|
