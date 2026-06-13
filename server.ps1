@@ -335,7 +335,9 @@ try {
                 Write-Host ""
                 Write-Host "MonitorCanvas läuft bereits." -ForegroundColor Green
                 Write-Host "Die vorhandene Anwendung wird geöffnet."
-                Start-Process $address
+                if (-not $NoBrowser) {
+                    Start-Process $address
+                }
                 Start-Sleep -Seconds 1
                 exit 0
             }
