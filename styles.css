@@ -522,7 +522,8 @@ output { color: var(--lime); font-variant-numeric: tabular-nums; }
   pointer-events: none;
 }
 
-.seam-correction {
+.seam-correction,
+.seam-stretch {
   margin-top: 12px;
   padding-top: 10px;
   border-top: 1px dashed rgba(255, 140, 0, .24);

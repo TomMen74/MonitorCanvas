@@ -1,4 +1,4 @@
-const APP_VERSION = "1.1.4";
+const APP_VERSION = "1.1.6";
 const VERTICAL_OFFSET_MODE = "bottom-edge";
 const VERTICAL_OFFSET_MIN = -5000;
 const VERTICAL_OFFSET_MAX = 5000;
@@ -17,6 +17,7 @@ const state = {
   frames: {},
   verticalOffsets: {},
   seamCorrections: {},
+  seamScales: {},
   ai: {
     subject: "",
     style: "cinematic",
@@ -127,6 +128,7 @@ function serializableSession() {
     frames: state.frames,
     verticalOffsets: state.verticalOffsets,
     seamCorrections: state.seamCorrections,
+    seamScales: state.seamScales,
     verticalOffsetMode: VERTICAL_OFFSET_MODE,
     ai: state.ai,
     view: state.view,
@@ -171,6 +173,7 @@ async function restoreSession() {
       ? saved.verticalOffsets ?? {}
       : {};
     state.seamCorrections = saved.seamCorrections ?? {};
+    state.seamScales = saved.seamScales ?? {};
     state.ai = { ...state.ai, ...(saved.ai ?? {}) };
     state.view = saved.view ?? "real";
 
@@ -236,6 +239,10 @@ function seamCorrectionMillimeters(monitor) {
   return Number(state.seamCorrections?.[monitor.id] ?? 0);
 }
 
+function seamScalePercent(monitor) {
+  return Number(state.seamScales?.[monitor.id] ?? 0);
+}
+
 function inferredMonitorDiagonal(monitor) {
   if (monitor.width >= 3000 && monitor.height <= 1600) return 34;
   return state.diagonal;
@@ -255,6 +262,19 @@ function correctedSourceY(monitor, layout) {
   const offset = seamCorrectionMillimeters(monitor) * pixelsPerMillimeter(monitor);
   const maximum = Math.max(0, layout.height - monitor.height);
   return Math.max(0, Math.min(maximum, monitor.sourceY + offset));
+}
+
+function seamSourceScale(monitor) {
+  return Math.max(0.85, Math.min(1.15, 1 + seamScalePercent(monitor) / 100));
+}
+
+function correctedSourceRect(monitor, layout) {
+  const y = correctedSourceY(monitor, layout);
+  const height = Math.max(1, monitor.height * seamSourceScale(monitor));
+  return {
+    y,
+    height: Math.min(height, Math.max(1, layout.height - y))
+  };
 }
 
 function physicalLayout() {
@@ -320,7 +340,7 @@ function physicalLayout() {
     sourceY: monitor.sourceY - minSourceY
   }));
   const width = Math.max(...layouts.map(m => m.sourceX + m.width));
-  const height = Math.max(...layouts.map(m => m.sourceY + m.height));
+  const height = Math.max(...layouts.map(m => m.sourceY + m.height * Math.max(1, seamSourceScale(m))));
   return { monitors: layouts, width, height };
 }
 
@@ -352,6 +372,7 @@ async function loadMonitors() {
   ensureVerticalOffsetDefaults();
   ensureMonitorDiagonalDefaults();
   ensureSeamCorrectionDefaults();
+  ensureSeamScaleDefaults();
   promptSelfTestPassed = runPromptSelfTests();
   renderMonitorList();
   renderFrameControls();
@@ -415,6 +436,17 @@ function ensureSeamCorrectionDefaults() {
   });
 }
 
+function ensureSeamScaleDefaults() {
+  if (!state.seamScales || typeof state.seamScales !== "object") {
+    state.seamScales = {};
+  }
+  state.monitors.forEach(monitor => {
+    if (state.seamScales[monitor.id] == null) {
+      state.seamScales[monitor.id] = 0;
+    }
+  });
+}
+
 function clampVerticalOffset(value) {
   const number = Number(value);
   if (!Number.isFinite(number)) return 0;
@@ -427,14 +459,22 @@ function clampSeamCorrection(value) {
   return Math.max(-80, Math.min(80, Math.round(number * 10) / 10));
 }
 
+function clampSeamScale(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return 0;
+  return Math.max(-8, Math.min(8, Math.round(number * 10) / 10));
+}
+
 function renderMonitorList() {
   elements.monitorCount.textContent = state.monitors.length;
   elements.monitorList.innerHTML = "";
   sortedMonitors().forEach((monitor, index) => {
     const offset = clampVerticalOffset(state.verticalOffsets[monitor.id] ?? 0);
     const seamCorrection = clampSeamCorrection(state.seamCorrections[monitor.id] ?? 0);
+    const seamScale = clampSeamScale(state.seamScales[monitor.id] ?? 0);
     state.verticalOffsets[monitor.id] = offset;
     state.seamCorrections[monitor.id] = seamCorrection;
+    state.seamScales[monitor.id] = seamScale;
     const card = document.createElement("article");
     card.className = "monitor-card";
     card.innerHTML = `
@@ -472,6 +512,20 @@ function renderMonitorList() {
                 <span>mm</span>
               </div>
             </div>
+          </div>
+          <div class="seam-stretch">
+            <label for="seam-scale-${safeId(monitor.id)}">
+              <span>Naht-Streckung</span>
+              <strong>${formatPercent(seamScale)}</strong>
+            </label>
+            <div class="offset-control-row">
+              <input id="seam-scale-${safeId(monitor.id)}" type="range" min="-8" max="8" step="0.1" value="${seamScale}">
+              <div class="offset-number">
+                <input type="number" min="-8" max="8" step="0.1" value="${seamScale}" aria-label="Naht-Streckung in Prozent">
+                <span>%</span>
+              </div>
+            </div>
+            <div class="range-labels"><span>unten runter</span><span>unten hoch</span></div>
           </div>
         </div>
       `}
@@ -529,6 +583,33 @@ function renderMonitorList() {
         }
       });
     }
+
+    const seamScaleRange = card.querySelector(".seam-stretch input[type=\"range\"]");
+    const seamScaleNumber = card.querySelector(".seam-stretch input[type=\"number\"]");
+    const seamScaleLabel = card.querySelector(".seam-stretch strong");
+    const applySeamScale = rawValue => {
+      const value = clampSeamScale(rawValue);
+      state.seamScales[monitor.id] = value;
+      seamScaleRange.value = value;
+      seamScaleNumber.value = value;
+      seamScaleLabel.textContent = formatPercent(value);
+      schedulePersistence();
+      queueRender();
+    };
+    if (seamScaleRange && seamScaleNumber) {
+      seamScaleRange.addEventListener("input", () => applySeamScale(seamScaleRange.value));
+      seamScaleNumber.addEventListener("input", () => {
+        if (seamScaleNumber.value === "") return;
+        applySeamScale(seamScaleNumber.value);
+      });
+      seamScaleNumber.addEventListener("change", () => {
+        if (seamScaleNumber.value === "") {
+          applySeamScale(0);
+        } else {
+          applySeamScale(seamScaleNumber.value);
+        }
+      });
+    }
     elements.monitorList.append(card);
   });
 }
@@ -536,6 +617,11 @@ function renderMonitorList() {
 function formatVerticalOffset(value) {
   if (value === 0) return "0 mm";
   return `${Math.abs(value).toFixed(0)} mm ${value < 0 ? "höher" : "tiefer"}`;
+}
+
+function formatPercent(value) {
+  if (value === 0) return "0 %";
+  return `${value > 0 ? "+" : ""}${value.toFixed(1)} %`;
 }
 
 function renderFrameControls() {
@@ -823,15 +909,16 @@ function renderPreview() {
     const w = monitor.width * previewScale;
     const h = monitor.height * previewScale;
     const sourceScale = source.width / layout.width;
+    const sourceRect = correctedSourceRect(monitor, layout);
 
     context.fillStyle = "#050607";
     context.fillRect(x - 5, y - 5, w + 10, h + 10);
     context.drawImage(
       source,
       monitor.sourceX * sourceScale,
-      correctedSourceY(monitor, layout) * sourceScale,
+      sourceRect.y * sourceScale,
       monitor.width * sourceScale,
-      monitor.height * sourceScale,
+      sourceRect.height * sourceScale,
       x,
       y,
       w,
@@ -1136,12 +1223,13 @@ function buildExportCanvas() {
   context.fillRect(0, 0, canvas.width, canvas.height);
 
   layout.monitors.forEach(monitor => {
+    const sourceRect = correctedSourceRect(monitor, layout);
     context.drawImage(
       source,
       monitor.sourceX,
-      correctedSourceY(monitor, layout),
+      sourceRect.y,
       monitor.width,
-      monitor.height,
+      sourceRect.height,
       monitor.x - bounds.minX,
       monitor.y - bounds.minY,
       monitor.width,
@@ -1206,6 +1294,7 @@ function projectData() {
       frames: state.frames,
       verticalOffsets: state.verticalOffsets,
       seamCorrections: state.seamCorrections,
+      seamScales: state.seamScales,
       ai: state.ai,
       imageLayout: state.images.map(image => ({
         name: image.name,
@@ -1238,6 +1327,7 @@ async function openProject(file) {
     ensureVerticalOffsetDefaults();
     ensureMonitorDiagonalDefaults();
     ensureSeamCorrectionDefaults();
+    ensureSeamScaleDefaults();
     for (const savedImage of project.settings.imageLayout ?? []) {
       const image = state.images.find(candidate => candidate.name === savedImage.name);
       if (!image) continue;

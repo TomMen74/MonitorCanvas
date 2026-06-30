@@ -6,7 +6,6 @@ param(
 $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
 $DataDirectory = Join-Path $env:LOCALAPPDATA "MonitorCanvas"
-$WallpaperPath = Join-Path $DataDirectory "monitor-canvas-wallpaper.png"
 
 Add-Type -TypeDefinition @"
 using System;
@@ -268,14 +267,22 @@ function Set-MonitorCanvasWallpaper {
     }
 
     [IO.Directory]::CreateDirectory($DataDirectory) | Out-Null
-    [IO.File]::WriteAllBytes($WallpaperPath, $PngBytes)
+    $wallpaperPath = Join-Path $DataDirectory ("monitor-canvas-wallpaper-{0}.png" -f ([DateTimeOffset]::Now.ToUnixTimeMilliseconds()))
+    [IO.File]::WriteAllBytes($wallpaperPath, $PngBytes)
     Set-ItemProperty -Path "HKCU:\Control Panel\Desktop" -Name "WallpaperStyle" -Value "22"
     Set-ItemProperty -Path "HKCU:\Control Panel\Desktop" -Name "TileWallpaper" -Value "0"
 
-    $success = [MonitorCanvas.NativeMethods]::SystemParametersInfo(20, 0, $WallpaperPath, 3)
+    $success = [MonitorCanvas.NativeMethods]::SystemParametersInfo(20, 0, $wallpaperPath, 3)
     if (-not $success) {
         throw "Windows konnte das Hintergrundbild nicht übernehmen."
     }
+
+    Get-ChildItem -Path $DataDirectory -Filter "monitor-canvas-wallpaper-*.png" -File |
+        Sort-Object LastWriteTime -Descending |
+        Select-Object -Skip 8 |
+        Remove-Item -Force -ErrorAction SilentlyContinue
+
+    return $wallpaperPath
 }
 
 function Handle-Request {
@@ -293,8 +300,8 @@ function Handle-Request {
     }
 
     if ($Request.Method -eq "POST" -and $requestPath -eq "/api/wallpaper") {
-        Set-MonitorCanvasWallpaper $Request.Body
-        Send-Json $Stream 200 @{ ok = $true; path = $WallpaperPath }
+        $wallpaperPath = Set-MonitorCanvasWallpaper $Request.Body
+        Send-Json $Stream 200 @{ ok = $true; path = $wallpaperPath }
         return
     }
 
