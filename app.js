@@ -1,3 +1,8 @@
+const APP_VERSION = "1.1.4";
+const VERTICAL_OFFSET_MODE = "bottom-edge";
+const VERTICAL_OFFSET_MIN = -5000;
+const VERTICAL_OFFSET_MAX = 5000;
+
 const state = {
   monitors: [],
   images: [],
@@ -7,9 +12,11 @@ const state = {
   offsetX: 0,
   offsetY: 0,
   diagonal: 27,
+  monitorDiagonals: {},
   gaps: {},
   frames: {},
   verticalOffsets: {},
+  seamCorrections: {},
   ai: {
     subject: "",
     style: "cinematic",
@@ -38,6 +45,7 @@ const elements = {
   aiFocus: document.querySelector("#aiFocus"),
   aiAvoid: document.querySelector("#aiAvoid"),
   aiPrompt: document.querySelector("#aiPrompt"),
+  aiPromptCheck: document.querySelector("#aiPromptCheck"),
   aiRecommendation: document.querySelector("#aiRecommendation"),
   qualityNotice: document.querySelector("#qualityNotice"),
   exportSize: document.querySelector("#exportSize"),
@@ -50,6 +58,7 @@ let toastTimer;
 let persistenceTimer;
 let previewGeometry = null;
 let dragState = null;
+let promptSelfTestPassed = false;
 
 const SESSION_KEY = "monitorCanvas.session.v2";
 const IMAGE_DATABASE = "monitorCanvas.images";
@@ -113,9 +122,12 @@ function serializableSession() {
     activeImageId: state.activeImageId,
     fitMode: state.fitMode,
     diagonal: state.diagonal,
+    monitorDiagonals: state.monitorDiagonals,
     gaps: state.gaps,
     frames: state.frames,
     verticalOffsets: state.verticalOffsets,
+    seamCorrections: state.seamCorrections,
+    verticalOffsetMode: VERTICAL_OFFSET_MODE,
     ai: state.ai,
     view: state.view,
     images: state.images.map(image => ({
@@ -152,9 +164,13 @@ async function restoreSession() {
     if (saved.version !== 2) return;
     state.fitMode = saved.fitMode ?? state.fitMode;
     state.diagonal = saved.diagonal ?? state.diagonal;
+    state.monitorDiagonals = saved.monitorDiagonals ?? {};
     state.gaps = saved.gaps ?? {};
     state.frames = saved.frames ?? {};
-    state.verticalOffsets = saved.verticalOffsets ?? {};
+    state.verticalOffsets = saved.verticalOffsetMode === VERTICAL_OFFSET_MODE
+      ? saved.verticalOffsets ?? {}
+      : {};
+    state.seamCorrections = saved.seamCorrections ?? {};
     state.ai = { ...state.ai, ...(saved.ai ?? {}) };
     state.view = saved.view ?? "real";
 
@@ -216,9 +232,29 @@ function frameMillimeters(monitor, side) {
   return Number(state.frames?.[monitor.id]?.[side] ?? 0);
 }
 
+function seamCorrectionMillimeters(monitor) {
+  return Number(state.seamCorrections?.[monitor.id] ?? 0);
+}
+
+function inferredMonitorDiagonal(monitor) {
+  if (monitor.width >= 3000 && monitor.height <= 1600) return 34;
+  return state.diagonal;
+}
+
+function monitorDiagonal(monitor) {
+  const value = Number(state.monitorDiagonals?.[monitor.id]);
+  return Number.isFinite(value) && value >= 10 ? value : inferredMonitorDiagonal(monitor);
+}
+
 function pixelsPerMillimeter(monitor) {
   const diagonalPx = Math.hypot(monitor.width, monitor.height);
-  return diagonalPx / (state.diagonal * 25.4);
+  return diagonalPx / (monitorDiagonal(monitor) * 25.4);
+}
+
+function correctedSourceY(monitor, layout) {
+  const offset = seamCorrectionMillimeters(monitor) * pixelsPerMillimeter(monitor);
+  const maximum = Math.max(0, layout.height - monitor.height);
+  return Math.max(0, Math.min(maximum, monitor.sourceY + offset));
 }
 
 function physicalLayout() {
@@ -268,10 +304,11 @@ function physicalLayout() {
       .filter(transition => transition.boundary <= monitor.y)
       .reduce((sum, transition) => sum + transition.pixels, 0);
     const verticalOffset = Number(state.verticalOffsets[monitor.id] ?? 0);
+    const bottomAlignedY = bounds.maxY - (monitor.y + monitor.height);
     return {
       ...monitor,
       sourceX: monitor.x - bounds.minX + addedX,
-      sourceY: monitor.y - bounds.minY + addedY + verticalOffset * pixelsPerMillimeter(monitor)
+      sourceY: bottomAlignedY + addedY + verticalOffset * pixelsPerMillimeter(monitor)
     };
   });
 
@@ -313,6 +350,9 @@ async function loadMonitors() {
   }
   ensureFrameDefaults();
   ensureVerticalOffsetDefaults();
+  ensureMonitorDiagonalDefaults();
+  ensureSeamCorrectionDefaults();
+  promptSelfTestPassed = runPromptSelfTests();
   renderMonitorList();
   renderFrameControls();
   updateSummary();
@@ -353,11 +393,48 @@ function ensureVerticalOffsetDefaults() {
   });
 }
 
+function ensureMonitorDiagonalDefaults() {
+  if (!state.monitorDiagonals || typeof state.monitorDiagonals !== "object") {
+    state.monitorDiagonals = {};
+  }
+  state.monitors.forEach(monitor => {
+    if (state.monitorDiagonals[monitor.id] == null) {
+      state.monitorDiagonals[monitor.id] = inferredMonitorDiagonal(monitor);
+    }
+  });
+}
+
+function ensureSeamCorrectionDefaults() {
+  if (!state.seamCorrections || typeof state.seamCorrections !== "object") {
+    state.seamCorrections = {};
+  }
+  state.monitors.forEach(monitor => {
+    if (state.seamCorrections[monitor.id] == null) {
+      state.seamCorrections[monitor.id] = 0;
+    }
+  });
+}
+
+function clampVerticalOffset(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return 0;
+  return Math.max(VERTICAL_OFFSET_MIN, Math.min(VERTICAL_OFFSET_MAX, Math.round(number)));
+}
+
+function clampSeamCorrection(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return 0;
+  return Math.max(-80, Math.min(80, Math.round(number * 10) / 10));
+}
+
 function renderMonitorList() {
   elements.monitorCount.textContent = state.monitors.length;
   elements.monitorList.innerHTML = "";
   sortedMonitors().forEach((monitor, index) => {
-    const offset = Number(state.verticalOffsets[monitor.id] ?? 0);
+    const offset = clampVerticalOffset(state.verticalOffsets[monitor.id] ?? 0);
+    const seamCorrection = clampSeamCorrection(state.seamCorrections[monitor.id] ?? 0);
+    state.verticalOffsets[monitor.id] = offset;
+    state.seamCorrections[monitor.id] = seamCorrection;
     const card = document.createElement("article");
     card.className = "monitor-card";
     card.innerHTML = `
@@ -368,24 +445,88 @@ function renderMonitorList() {
       <p>${monitor.width} × ${monitor.height} px · ${monitor.width > monitor.height ? "Querformat" : "Hochformat"} · ${Math.round(monitor.scale * 100)} % Skalierung</p>
       <p>Systemposition: ${monitor.x}, ${monitor.y}</p>
       ${index === 0 ? `
-        <div class="monitor-reference">Referenz für die physische Höhe</div>
+        <div class="monitor-reference">Referenz für die gemeinsame Unterkante</div>
       ` : `
         <div class="monitor-offset">
           <label for="vertical-${safeId(monitor.id)}">
-            <span>Zusätzlicher Höhenversatz</span>
+            <span>Versatz ab Unterkante</span>
             <strong>${formatVerticalOffset(offset)}</strong>
           </label>
-          <input id="vertical-${safeId(monitor.id)}" type="range" min="-500" max="500" step="1" value="${offset}">
+          <div class="offset-control-row">
+            <input id="vertical-${safeId(monitor.id)}" type="range" min="${VERTICAL_OFFSET_MIN}" max="${VERTICAL_OFFSET_MAX}" step="1" value="${offset}">
+            <div class="offset-number">
+              <input type="number" min="${VERTICAL_OFFSET_MIN}" max="${VERTICAL_OFFSET_MAX}" step="1" value="${offset}" aria-label="Höhenversatz in Millimeter">
+              <span>mm</span>
+            </div>
+          </div>
           <div class="range-labels"><span>höher</span><span>tiefer</span></div>
+          <div class="seam-correction">
+            <label for="seam-${safeId(monitor.id)}">
+              <span>Naht-Feinabgleich</span>
+              <strong>${formatVerticalOffset(seamCorrection)}</strong>
+            </label>
+            <div class="offset-control-row">
+              <input id="seam-${safeId(monitor.id)}" type="range" min="-80" max="80" step="0.1" value="${seamCorrection}">
+              <div class="offset-number">
+                <input type="number" min="-80" max="80" step="0.1" value="${seamCorrection}" aria-label="Naht-Feinabgleich in Millimeter">
+                <span>mm</span>
+              </div>
+            </div>
+          </div>
         </div>
       `}
     `;
-    const offsetInput = card.querySelector('input[type="range"]');
-    if (offsetInput) {
-      offsetInput.addEventListener("input", () => {
-        state.verticalOffsets[monitor.id] = Number(offsetInput.value);
-        card.querySelector(".monitor-offset strong").textContent = formatVerticalOffset(Number(offsetInput.value));
-        queueRender();
+    const offsetRange = card.querySelector('input[type="range"]');
+    const offsetNumber = card.querySelector('input[type="number"]');
+    const offsetLabel = card.querySelector(".monitor-offset strong");
+    const applyOffset = rawValue => {
+      const value = clampVerticalOffset(rawValue);
+      state.verticalOffsets[monitor.id] = value;
+      offsetRange.value = value;
+      offsetNumber.value = value;
+      offsetLabel.textContent = formatVerticalOffset(value);
+      schedulePersistence();
+      queueRender();
+    };
+    if (offsetRange && offsetNumber) {
+      offsetRange.addEventListener("input", () => applyOffset(offsetRange.value));
+      offsetNumber.addEventListener("input", () => {
+        if (offsetNumber.value === "") return;
+        applyOffset(offsetNumber.value);
+      });
+      offsetNumber.addEventListener("change", () => {
+        if (offsetNumber.value === "") {
+          applyOffset(0);
+        } else {
+          applyOffset(offsetNumber.value);
+        }
+      });
+    }
+
+    const seamRange = card.querySelector(".seam-correction input[type=\"range\"]");
+    const seamNumber = card.querySelector(".seam-correction input[type=\"number\"]");
+    const seamLabel = card.querySelector(".seam-correction strong");
+    const applySeamCorrection = rawValue => {
+      const value = clampSeamCorrection(rawValue);
+      state.seamCorrections[monitor.id] = value;
+      seamRange.value = value;
+      seamNumber.value = value;
+      seamLabel.textContent = formatVerticalOffset(value);
+      schedulePersistence();
+      queueRender();
+    };
+    if (seamRange && seamNumber) {
+      seamRange.addEventListener("input", () => applySeamCorrection(seamRange.value));
+      seamNumber.addEventListener("input", () => {
+        if (seamNumber.value === "") return;
+        applySeamCorrection(seamNumber.value);
+      });
+      seamNumber.addEventListener("change", () => {
+        if (seamNumber.value === "") {
+          applySeamCorrection(0);
+        } else {
+          applySeamCorrection(seamNumber.value);
+        }
       });
     }
     elements.monitorList.append(card);
@@ -418,6 +559,13 @@ function renderFrameControls() {
         </div>
         <small>${escapeHtml(monitor.name)}</small>
       </header>
+      <div class="monitor-size-field">
+        <label for="diagonal-${safeId(monitor.id)}">Bildschirmgröße dieses Monitors</label>
+        <div class="input-suffix">
+          <input id="diagonal-${safeId(monitor.id)}" type="number" min="10" max="80" step="0.1" value="${monitorDiagonal(monitor)}" data-monitor-diagonal>
+          <span>Zoll</span>
+        </div>
+      </div>
       <div class="frame-link-heading">
         <span>Seiten gemeinsam ändern</span>
         <small>Markieren zum Koppeln</small>
@@ -459,8 +607,16 @@ function renderFrameControls() {
         row.querySelector(".frame-range").value = value;
         row.querySelector('input[type="number"]').value = value;
       });
+      schedulePersistence();
       queueRender();
     };
+
+    card.querySelector("[data-monitor-diagonal]").addEventListener("input", event => {
+      const value = Math.max(10, Math.min(80, Number(event.target.value) || inferredMonitorDiagonal(monitor)));
+      state.monitorDiagonals[monitor.id] = value;
+      schedulePersistence();
+      queueRender();
+    });
 
     card.querySelectorAll(".frame-side-row").forEach(row => {
       const side = row.dataset.side;
@@ -673,7 +829,7 @@ function renderPreview() {
     context.drawImage(
       source,
       monitor.sourceX * sourceScale,
-      monitor.sourceY * sourceScale,
+      correctedSourceY(monitor, layout) * sourceScale,
       monitor.width * sourceScale,
       monitor.height * sourceScale,
       x,
@@ -773,16 +929,12 @@ function aiWallpaperPlan() {
   const portraitMonitors = layout.monitors
     .map((monitor, index) => ({ monitor, index }))
     .filter(item => item.monitor.height > item.monitor.width);
-  const largestMonitor = [...layout.monitors].sort((left, right) =>
-    right.width * right.height - left.width * left.height
-  )[0];
-  const largestIndex = Math.max(0, layout.monitors.findIndex(monitor => monitor.id === largestMonitor?.id));
   const focusNames = {
-    automatic: `innerhalb von Monitor ${largestIndex + 1}, mit Abstand zu allen Bildschirmkanten`,
-    left: "im linken Drittel einer sichtbaren Monitorfläche",
-    center: "mittig innerhalb einer einzelnen Monitorfläche, nicht auf einem Übergang",
-    right: "im rechten Drittel einer sichtbaren Monitorfläche",
-    distributed: "als mehrere visuelle Schwerpunkte, jeweils innerhalb einer eigenen Monitorfläche"
+    automatic: "in der größten ununterbrochenen Bildfläche und deutlich entfernt von schmalen Übergangszonen",
+    left: "im linken Drittel der Gesamtkomposition",
+    center: "nahe der Bildmitte, aber nicht auf einer schmalen Übergangszone",
+    right: "im rechten Drittel der Gesamtkomposition",
+    distributed: "als mehrere harmonisch verteilte Schwerpunkte mit ausreichend ruhigem Raum dazwischen"
   };
   const styleNames = {
     cinematic: "filmisch, atmosphärisch, detailreich, hochwertige Lichtsetzung",
@@ -801,28 +953,29 @@ function aiWallpaperPlan() {
     colorful: "farbenreiche, lebendige Stimmung",
     elegant: "elegante, zurückhaltende und hochwertige Stimmung"
   };
-  const transitions = Math.max(0, layout.monitors.length - 1);
-  const orientationDescription = layout.monitors
-    .map((monitor, index) => `Monitor ${index + 1}: ${monitor.width > monitor.height ? "Querformat" : "Hochformat"}`)
-    .join(", ");
-  const portraitHint = portraitMonitors.length
-    ? `Der Bereich von ${portraitMonitors.map(item => `Monitor ${item.index + 1}`).join(" und ")} muss als eigenständige vertikale Komposition funktionieren.`
-    : "Alle sichtbaren Bereiche sind im Querformat angeordnet.";
+  const portraitRegions = portraitMonitors.map(item => {
+    const center = (item.monitor.sourceX + item.monitor.width / 2) / layout.width;
+    if (center < 0.34) return "linken";
+    if (center > 0.66) return "rechten";
+    return "mittleren";
+  });
+  const portraitHint = portraitRegions.length
+    ? `Im ${[...new Set(portraitRegions)].join(" und ")} Bildbereich zusätzlich eine starke vertikale Komposition vorsehen, die trotzdem Teil derselben durchgehenden Szene bleibt.`
+    : "Die Szene als breites, durchgehendes Panorama komponieren.";
   const avoid = ["Text", "Logos", "Wasserzeichen", "abgeschnittene Hauptmotive an Bildschirmübergängen"];
   if (state.ai.avoid.trim()) avoid.push(state.ai.avoid.trim());
   const subject = state.ai.subject.trim() || "ein visuell eindrucksvolles, zusammenhängendes Panorama";
 
   const prompt = [
-    `Erstelle ein ${styleNames[state.ai.style]} Wallpaper: ${subject}.`,
+    `Erzeuge EIN EINZIGES zusammenhängendes, randloses Wallpaper als eine einzige durchgehende Szene: ${subject}.`,
+    "Keine Collage, kein Diptychon oder Triptychon, keine geteilte Ansicht, keine einzelnen Bildfelder und kein Geräte-Mockup.",
+    `Bildstil: ${styleNames[state.ai.style]}.`,
     `${moodNames[state.ai.mood]}.`,
-    `Komposition für eine Monitorwand mit ${layout.monitors.length} Monitor${layout.monitors.length === 1 ? "" : "en"} und einem Gesamtseitenverhältnis von ${ratio.toFixed(2)}:1.`,
-    `Zielauflösung mindestens ${nativeWidth} × ${nativeHeight} Pixel, ideal ${idealWidth} × ${idealHeight} Pixel.`,
-    `Monitoranordnung: ${orientationDescription}. ${portraitHint}`,
+    `Komposition: eine sehr breite, natürlich fortlaufende Panoramaszene. ${portraitHint}`,
     `Das wichtigste Motiv liegt ${focusNames[state.ai.focus]}.`,
-    `Wichtige Gesichter, Schrift, Augen, Fahrzeuge und klare geometrische Objekte vollständig innerhalb einzelner Monitorflächen platzieren.`,
-    `Zwischen den Monitoren liegen ${transitions} physische Übergang${transitions === 1 ? "" : "e"} mit Rahmenkorrektur. Dort nur unkritische Hintergründe, Himmel, Nebel, Wasser, Boden, Lichtspuren oder fortlaufende Texturen verwenden.`,
-    `Das Bild muss an allen sichtbaren Außenkanten natürlich weiterwirken und darf keine dekorativen Bildrahmen enthalten.`,
-    `Vermeiden: ${avoid.join(", ")}.`
+    "Wichtige Gesichter, Augen, Fahrzeuge und klare geometrische Objekte nicht an schmalen Übergangszonen platzieren. Diese Zonen nicht sichtbar markieren; dort nur natürlich fortlaufende Hintergründe, Himmel, Nebel, Wasser, Boden, Lichtspuren oder Texturen verwenden.",
+    "Die Szene muss über die gesamte Fläche optisch nahtlos bleiben und an allen Außenkanten natürlich weiterwirken.",
+    `Vermeiden: ${avoid.join(", ")}, sichtbare Schrift, Buchstaben, Zahlen, Maßangaben, Seitenverhältnisse, Beschriftungen, Rahmen, Trennlinien, Panels, Raster und Benutzeroberflächen.`
   ].join("\n\n");
 
   return {
@@ -837,6 +990,64 @@ function aiWallpaperPlan() {
   };
 }
 
+function promptSafetyIssues(prompt) {
+  const checks = [
+    { pattern: /\bmonitore?\b/i, label: "Monitor-Begriff" },
+    { pattern: /\bdisplays?\b/i, label: "Display-Begriff" },
+    { pattern: /\bpixel\b|\bpx\b/i, label: "Pixelangabe" },
+    { pattern: /\bauflösung\b/i, label: "Auflösungsangabe" },
+    { pattern: /\bseitenverhältnis\b/i, label: "Seitenverhältnis" },
+    { pattern: /\d+\s*[x×:]\s*\d+/i, label: "sichtbare Maß- oder Verhältniszahl" }
+  ];
+  return checks.filter(check => check.pattern.test(prompt)).map(check => check.label);
+}
+
+function runPromptSelfTests() {
+  const original = { ...state.ai };
+  const scenarios = [
+    {
+      subject: "eine futuristische Stadt bei Nacht mit nassen Straßen",
+      style: "cinematic",
+      mood: "dramatic",
+      focus: "automatic",
+      avoid: ""
+    },
+    {
+      subject: "eine ruhige Berglandschaft über den Wolken",
+      style: "photorealistic",
+      mood: "calm",
+      focus: "left",
+      avoid: "Menschen"
+    },
+    {
+      subject: "fließende abstrakte Formen aus Licht und Nebel",
+      style: "abstract",
+      mood: "colorful",
+      focus: "distributed",
+      avoid: ""
+    }
+  ];
+  const results = scenarios.map(scenario => {
+    state.ai = scenario;
+    const prompt = aiWallpaperPlan().prompt;
+    return {
+      prompt,
+      checks: [
+        prompt.startsWith("Erzeuge EIN EINZIGES"),
+        prompt.includes("Keine Collage"),
+        prompt.includes("keine geteilte Ansicht"),
+        prompt.includes("sichtbare Schrift, Buchstaben, Zahlen"),
+        promptSafetyIssues(prompt).length === 0
+      ]
+    };
+  });
+  state.ai = original;
+
+  const passed = results.every(result => result.checks.every(Boolean));
+  console.assert(passed, "MonitorCanvas Prompt-Selbsttest fehlgeschlagen.", results);
+  return passed;
+}
+
 function updateAIAssistant() {
   if (!elements.aiPrompt || !state.monitors.length) return;
   const plan = aiWallpaperPlan();
@@ -847,6 +1058,14 @@ function updateAIAssistant() {
     <div><span>Seitenverhältnis</span><strong>${plan.ratio.toFixed(2)} : 1</strong></div>
     <div><span>Ausrichtung</span><strong>${plan.portraitCount ? `${plan.portraitCount} × Hochformat` : "Nur Querformat"}</strong></div>
   `;
+  const issues = promptSafetyIssues(plan.prompt);
+  const hasWarning = !promptSelfTestPassed || issues.length > 0;
+  elements.aiPromptCheck.classList.toggle("warn", hasWarning);
+  elements.aiPromptCheck.textContent = !promptSelfTestPassed
+    ? "Interner Prompt-Test fehlgeschlagen. Diesen Prompt noch nicht verwenden."
+    : issues.length
+    ? `Bitte prüfen: ${issues.join(", ")} im Motivtext erkannt. Technische Angaben können als sichtbarer Text erzeugt werden.`
+    : "Interner Test bestanden: ein Bild, keine Collage und keine technischen Größen im Bildprompt.";
 }
 
 async function copyAIPrompt() {
@@ -880,26 +1099,17 @@ function downloadCompositionMask() {
     const height = monitor.height * scale;
     const inset = Math.max(8, Math.min(width, height) * 0.06);
 
-    context.fillStyle = index % 2 ? "#29231e" : "#242424";
+    context.fillStyle = "#242424";
     context.fillRect(x, y, width, height);
     context.strokeStyle = "#ff8c00";
     context.lineWidth = Math.max(2, 4 * scale);
     context.strokeRect(x, y, width, height);
+    context.fillStyle = "rgba(69, 212, 131, .12)";
+    context.fillRect(x + inset, y + inset, width - inset * 2, height - inset * 2);
     context.setLineDash([12, 8]);
-    context.strokeStyle = "rgba(255,255,255,.48)";
+    context.strokeStyle = "rgba(69, 212, 131, .72)";
     context.strokeRect(x + inset, y + inset, width - inset * 2, height - inset * 2);
     context.setLineDash([]);
-
-    context.fillStyle = "#fff8ef";
-    context.font = `700 ${Math.max(14, Math.round(24 * scale))}px Segoe UI`;
-    context.fillText(`Monitor ${index + 1}`, x + inset, y + inset + Math.max(18, 28 * scale));
-    context.fillStyle = "#ffb15a";
-    context.font = `${Math.max(11, Math.round(16 * scale))}px Segoe UI`;
-    context.fillText(
-      `${monitor.width > monitor.height ? "Querformat" : "Hochformat"} · sichere Motivfläche gestrichelt`,
-      x + inset,
-      y + inset + Math.max(38, 52 * scale)
-    );
   });
 
   canvas.toBlob(blob => {
@@ -907,10 +1117,10 @@ function downloadCompositionMask() {
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement("a");
     anchor.href = url;
-    anchor.download = `monitorcanvas-kompositionsmaske-${plan.nativeWidth}x${plan.nativeHeight}.png`;
+    anchor.download = `monitorcanvas-kompositionshilfe-${plan.nativeWidth}x${plan.nativeHeight}.png`;
     anchor.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
-    showToast("Die Kompositionsmaske wurde erstellt.");
+    showToast("Die Kompositionshilfe wurde erstellt.");
   }, "image/png");
 }
 
@@ -929,7 +1139,7 @@ function buildExportCanvas() {
     context.drawImage(
       source,
       monitor.sourceX,
-      monitor.sourceY,
+      correctedSourceY(monitor, layout),
       monitor.width,
       monitor.height,
       monitor.x - bounds.minX,
@@ -991,9 +1201,11 @@ function projectData() {
       offsetX: state.offsetX,
       offsetY: state.offsetY,
       diagonal: state.diagonal,
+      monitorDiagonals: state.monitorDiagonals,
       gaps: state.gaps,
       frames: state.frames,
       verticalOffsets: state.verticalOffsets,
+      seamCorrections: state.seamCorrections,
       ai: state.ai,
       imageLayout: state.images.map(image => ({
         name: image.name,
@@ -1024,6 +1236,8 @@ async function openProject(file) {
     Object.assign(state, project.settings);
     ensureFrameDefaults();
     ensureVerticalOffsetDefaults();
+    ensureMonitorDiagonalDefaults();
+    ensureSeamCorrectionDefaults();
     for (const savedImage of project.settings.imageLayout ?? []) {
       const image = state.images.find(candidate => candidate.name === savedImage.name);
       if (!image) continue;
@@ -1311,5 +1525,6 @@ function bindEvents() {
 }
 
 bindEvents();
+document.querySelector("#appVersion").textContent = `Version ${APP_VERSION}`;
 syncControls();
 restoreSession().finally(loadMonitors);

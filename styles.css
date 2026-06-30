@@ -495,6 +495,39 @@ output { color: var(--lime); font-variant-numeric: tabular-nums; }
 
 .monitor-offset input { width: 100%; }
 
+.offset-control-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 90px;
+  align-items: center;
+  gap: 9px;
+}
+
+.offset-number {
+  position: relative;
+}
+
+.offset-number input {
+  height: 32px;
+  padding: 0 29px 0 8px;
+  font-size: 10px;
+}
+
+.offset-number span {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  color: var(--muted);
+  font-size: 9px;
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+
+.seam-correction {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px dashed rgba(255, 140, 0, .24);
+}
+
 .range-labels {
   margin-top: 1px;
   color: #737b88;
@@ -586,6 +619,18 @@ output { color: var(--lime); font-variant-numeric: tabular-nums; }
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.monitor-size-field {
+  margin-top: 12px;
+}
+
+.monitor-size-field label {
+  display: block;
+  margin-bottom: 6px;
+  color: #d6cec6;
+  font-size: 10px;
+  font-weight: 700;
 }
 
 .frame-link-heading {
@@ -786,6 +831,24 @@ output { color: var(--lime); font-variant-numeric: tabular-nums; }
   font-size: 11px;
 }
 
+.prompt-check {
+  min-height: 30px;
+  margin-top: 9px;
+  padding: 8px 10px;
+  border: 1px solid rgba(69, 212, 131, .32);
+  border-radius: 6px;
+  color: #82e5ab;
+  background: rgba(69, 212, 131, .06);
+  font-size: 10px;
+  line-height: 1.4;
+}
+
+.prompt-check.warn {
+  border-color: rgba(255, 177, 90, .45);
+  color: var(--orange);
+  background: rgba(255, 140, 0, .06);
+}
+
 .canvas-panel {
   min-width: 0;
   padding: 30px;
@@ -930,6 +993,33 @@ output { color: var(--lime); font-variant-numeric: tabular-nums; }
 .toast.visible {
   opacity: 1;
   transform: translateY(0);
+}
+
+.app-footer {
+  max-width: 1500px;
+  margin: 16px auto 0;
+  padding: 0 4px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: #746d66;
+  font-size: 10px;
+}
+
+.app-footer strong {
+  color: #91877e;
+  font-weight: 600;
+}
+
+.app-footer a {
+  color: #91877e;
+  text-decoration: none;
+  transition: color .18s ease, text-shadow .18s ease;
+}
+
+.app-footer a:hover {
+  color: var(--lime);
+  text-shadow: 0 0 12px rgba(255, 140, 0, .35);
 }
 
 @media (max-width: 1180px) {

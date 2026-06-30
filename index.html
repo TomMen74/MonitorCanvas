@@ -156,9 +156,11 @@
               <label for="aiPrompt">Fertiger Prompt</label>
               <textarea id="aiPrompt" class="prompt-output" rows="11" readonly></textarea>
             </div>
+            <div id="aiPromptCheck" class="prompt-check" role="status"></div>
 
             <button id="copyPromptButton" class="button button-primary button-full" type="button">Prompt kopieren</button>
-            <button id="downloadMaskButton" class="button button-secondary button-full" type="button">Kompositionsmaske herunterladen</button>
+            <button id="downloadMaskButton" class="button button-secondary button-full" type="button">Kompositionshilfe herunterladen</button>
+            <p class="fine-print">Die Kompositionshilfe ist für deine Planung gedacht. Nicht als Bildreferenz in einen Generator laden, da sichtbare Flächen sonst als Collage übernommen werden können.</p>
           </section>
 
           <section class="panel-section step-panel" data-panel="monitors">
@@ -182,7 +184,7 @@
             </div>
             <p class="helper">Jeder Monitor hat eigene Werte für oben, rechts, unten und links. Markierte Seiten werden gemeinsam geändert.</p>
             <div class="field-group">
-              <label for="screenDiagonal">Referenz-Bildschirmgröße</label>
+              <label for="screenDiagonal">Standard-Bildschirmgröße</label>
               <div class="input-suffix">
                 <input id="screenDiagonal" type="number" min="10" max="80" step="0.1" value="27">
                 <span>Zoll</span>
@@ -236,6 +238,10 @@
           </div>
         </section>
       </div>
+      <footer class="app-footer">
+        <span>MonitorCanvas <strong id="appVersion">Version wird geladen</strong></span>
+        <a href="https://github.com/TomMen74/MonitorCanvas" target="_blank" rel="noopener noreferrer">Quellcode auf GitHub</a>
+      </footer>
     </main>
   </div>
 

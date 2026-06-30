@@ -63,7 +63,7 @@ erstellt.
 - Bilder direkt in der Vorschau verschieben und an Kanten einrasten
 - KI-Prompt-Assistent passend zur erkannten Monitorwand
 - automatische Empfehlung für Seitenverhältnis und Bildauflösung
-- herunterladbare Kompositionsmaske für externe Bildgeneratoren
+- herunterladbare Kompositionshilfe für die eigene Planung
 - Echtzeitvorschau mit realer und technischer Ansicht
 - automatische Wiederherstellung der letzten Sitzung
 - PNG-Export in der Größe des virtuellen Windows-Desktops
@@ -87,8 +87,17 @@ erkannte Monitoranordnung, Hochformatbereiche, Rahmenübergänge und sichere
 Positionen für wichtige Bildinhalte berücksichtigt.
 
 MonitorCanvas empfiehlt außerdem eine native Mindestauflösung und eine ideale
-Generierungsgröße. Eine passende Kompositionsmaske kann als PNG heruntergeladen
-und bei einem externen Bildgenerator als visuelle Referenz verwendet werden.
+Generierungsgröße. Diese technischen Werte werden bewusst nicht in den
+Bildprompt geschrieben, weil einige Generatoren Zahlen und Seitenverhältnisse
+als sichtbaren Text in das Motiv übernehmen.
+
+Eine Kompositionshilfe kann als PNG heruntergeladen werden. Sie dient der
+eigenen Planung und sollte nicht als Bildreferenz in einen Generator geladen
+werden, da sichtbare Flächen sonst als Collage interpretiert werden können.
+
+Der KI-Assistent ist eine Vorschaufunktion. Bildgeneratoren reagieren trotz
+gleichem Prompt unterschiedlich; neue Promptvorlagen werden deshalb vor einer
+Veröffentlichung praktisch mit mindestens einem Anbieter geprüft.
 
 ## Rahmen präzise einstellen
 
