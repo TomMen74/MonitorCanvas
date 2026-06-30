@@ -71,7 +71,7 @@ erstellt.
 
 ## Teststatus
 
-**Version 1.1.4** wurde im realen Betrieb mit zwei Monitoren getestet,
+**Version 1.1.6** wurde im realen Betrieb mit zwei Monitoren getestet,
 einschließlich einer gemischten Anordnung aus Quer- und Hochformat, einem
 34-Zoll-Curved-Monitor und einem 27-Zoll-Monitor im Hochformat.
 
@@ -149,12 +149,12 @@ auf `start.bat`.
 
 Neue Windows-Pakete werden über GitHub Actions gebaut. Der Workflow
 **Windows-Pakete erstellen** kann auf GitHub manuell mit einer Versionsnummer
-gestartet werden. Ein Versions-Tag wie `v1.1.4` erstellt zusätzlich automatisch
+gestartet werden. Ein Versions-Tag wie `v1.1.6` erstellt zusätzlich automatisch
 ein öffentliches GitHub Release:
 
 ```text
-MonitorCanvas-1.1.4-Setup.exe
-MonitorCanvas-1.1.4-Portable.zip
+MonitorCanvas-1.1.6-Setup.exe
+MonitorCanvas-1.1.6-Portable.zip
 ```
 
 ## Lizenz
