@@ -71,8 +71,9 @@ erstellt.
 
 ## Teststatus
 
-**Version 1.0.0** wurde im realen Betrieb mit zwei Monitoren getestet,
-einschließlich einer gemischten Anordnung aus Quer- und Hochformat.
+**Version 1.1.4** wurde im realen Betrieb mit zwei Monitoren getestet,
+einschließlich einer gemischten Anordnung aus Quer- und Hochformat, einem
+34-Zoll-Curved-Monitor und einem 27-Zoll-Monitor im Hochformat.
 
 Die Anwendung und ihre Berechnungslogik sind für bis zu vier Monitore
 ausgelegt. Der Betrieb mit drei oder vier gleichzeitig angeschlossenen
@@ -118,7 +119,7 @@ und Hochformat.
 
 1. Bilder auswählen oder in die Anwendung ziehen.
 2. Die erkannte Monitoranordnung kontrollieren.
-3. Höhenversätze und Rahmenbreiten in Millimetern einstellen.
+3. Monitorgrößen, Höhenversätze, Rahmenbreiten und Naht-Feinabgleich in Millimetern einstellen.
 4. Bilder in der Monitorwand verschieben und zusammenfügen.
 5. Das Ergebnis als PNG speichern oder direkt als Hintergrund übernehmen.
 
@@ -128,9 +129,10 @@ Bei nebeneinanderliegenden Monitoren addiert MonitorCanvas den rechten Rahmen
 des linken Monitors und den linken Rahmen des rechten Monitors. Bei
 übereinanderliegenden Geräten werden der untere und obere Rahmen addiert.
 
-Die Umrechnung von Millimetern in Pixel erfolgt anhand der eingetragenen
-Bildschirmdiagonale. So überspringt das Motiv genau den Bereich, der durch die
-physischen Monitorrahmen verdeckt wird.
+Die Umrechnung von Millimetern in Pixel erfolgt anhand der je Monitor
+eingetragenen Bildschirmdiagonale. So überspringt das Motiv genau den Bereich,
+der durch die physischen Monitorrahmen verdeckt wird. Für kleine Restfehler an
+der sichtbaren Übergangskante gibt es zusätzlich einen Naht-Feinabgleich.
 
 ## Datenschutz
 
@@ -147,12 +149,12 @@ auf `start.bat`.
 
 Neue Windows-Pakete werden über GitHub Actions gebaut. Der Workflow
 **Windows-Pakete erstellen** kann auf GitHub manuell mit einer Versionsnummer
-gestartet werden. Ein Versions-Tag wie `v1.0.0` erstellt zusätzlich automatisch
+gestartet werden. Ein Versions-Tag wie `v1.1.4` erstellt zusätzlich automatisch
 ein öffentliches GitHub Release:
 
 ```text
-MonitorCanvas-1.0.0-Setup.exe
-MonitorCanvas-1.0.0-Portable.zip
+MonitorCanvas-1.1.4-Setup.exe
+MonitorCanvas-1.1.4-Portable.zip
 ```
 
 ## Lizenz
